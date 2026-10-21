@@ -1,0 +1,152 @@
+/* 预览图样式：数值抄自 client.js，用假数据画出插件自己的界面，不截真机屏幕。 */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 28px 56px;
+  background: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  color: #1f2328;
+  -webkit-font-smoothing: antialiased;
+}
+.stage { position: relative; width: 1360px; }
+
+/* 状态条本身：11.5px / 行高 16px / 5px 间距 / 右对齐 */
+.bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  height: 16px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+.bar .sep { color: #d1d5db; }
+.bar .branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.bar .dirty { color: #ea9a3e; cursor: pointer; }
+.bar .clean { color: #9ca3af; }
+.bar .badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 10.5px;
+  line-height: 15px;
+}
+.bar .commit { color: #9ca3af; text-decoration: none; border-bottom: 1px dotted #d1d5db; }
+.bar .icon { width: 12px; height: 12px; }
+
+/* 选择器行：与状态条同一基线，左对齐 */
+.selectorRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 16px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: #4b5563;
+}
+.chip { display: inline-flex; align-items: center; gap: 6px; }
+.chip .caret { color: #9ca3af; font-size: 10px; }
+
+/* 输入框卡片 */
+.card {
+  position: relative;
+  margin: 0 auto;
+  width: 952px;
+  min-height: 148px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.placeholder { color: #b6bcc6; font-size: 14px; }
+.cardFooter { display: flex; align-items: center; justify-content: space-between; }
+.footerLeft { display: inline-flex; align-items: center; gap: 14px; color: #6b7280; font-size: 12.5px; }
+.plus {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: #f3f4f6; color: #6b7280;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+.send {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: #b9c9f5; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 15px;
+}
+.layout { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+.layout .left { flex: 1 1 auto; display: flex; align-items: center; gap: 14px; }
+
+/* 分支弹层 */
+.popover {
+  position: absolute;
+  top: 46px;
+  right: 330px;
+  width: 306px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.12);
+  overflow: hidden;
+  font-size: 12px;
+}
+.popover .search {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f2f4;
+  color: #9ca3af;
+}
+.popover .item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  color: #1f2328;
+}
+.popover .item .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.popover .item .note { display: block; color: #9ca3af; font-size: 11px; }
+.popover .item.active { background: #f5f6f8; }
+.popover .item.disabled { opacity: 0.45; }
+.popover .item .right { margin-left: auto; color: #6b7280; }
+.popover .footer { border-top: 1px solid #f1f2f4; padding: 8px 12px; color: #4b5563; }
+
+/* 改动面板（右侧栏 tab） */
+.pane { width: 700px; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+.paneHead {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid #f1f2f4; font-size: 12.5px; color: #4b5563;
+}
+.paneHead .tab { padding: 3px 10px; border-radius: 8px; background: #f3f4f6; color: #1f2328; }
+.paneHead .count { margin-left: auto; color: #9ca3af; font-size: 11.5px; }
+.files { padding: 6px 0; border-bottom: 1px solid #f1f2f4; }
+.file {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 14px; font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #374151;
+}
+.file .status { width: 10px; color: #9ca3af; }
+.file .stat { margin-left: auto; font-size: 11px; color: #9ca3af; }
+.file .add { color: #16a34a; }
+.file .del { color: #dc2626; }
+.diff {
+  margin: 0; padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; line-height: 17px;
+  white-space: pre; color: #374151;
+  background: #fcfcfd;
+}
+.diff .hunk { color: #2563eb; }
+.diff .add { color: #16a34a; }
+.diff .del { color: #dc2626; }
+.diff .meta { color: #9ca3af; }
+.caption { margin: 10px 0 0; font-size: 12px; color: #9ca3af; }
