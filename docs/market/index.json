@@ -1,0 +1,79 @@
+{
+  "format": 1,
+  "title": {
+    "en": "MJN's DSH plugins",
+    "zh": "MJN 的 DSH 插件"
+  },
+  "metadata": {
+    "categories": {
+      "dev": {
+        "title": {
+          "en": "Developer tools",
+          "zh": "开发工具"
+        }
+      }
+    },
+    "labels": {
+      "git": {
+        "title": {
+          "en": "Git",
+          "zh": "Git"
+        }
+      }
+    },
+    "sortKeys": {
+      "stars": {
+        "title": {
+          "en": "Stars",
+          "zh": "Star 数"
+        },
+        "order": "desc"
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-git-bar",
+      "title": {
+        "en": "Git status bar",
+        "zh": "Git 状态条"
+      },
+      "description": {
+        "en": "Shows the repository, branch, working-tree changes and short SHA right above the composer; click the branch to search, switch or create one, click the change count to open the diff pane.",
+        "zh": "在输入框上方显示仓库、分支、改动数与短 SHA；点分支可搜索/切换/新建分支，点改动数直接打开右侧 diff 面板。"
+      },
+      "icon": "icons/git-bar.svg",
+      "author": "mengjingnan",
+      "homepage": "https://github.com/mjnhmd/dsh-git-bar#readme",
+      "repository": {
+        "url": "https://github.com/mjnhmd/dsh-git-bar"
+      },
+      "metadata": {
+        "category": "dev",
+        "labels": [
+          "git"
+        ],
+        "keywords": [
+          "git",
+          "branch",
+          "diff",
+          "status"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1792553491,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/mjnhmd/dsh-git-bar",
+            "commit": "PUT_40_HEX_COMMIT_SHA_HERE"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2"
+          }
+        }
+      ]
+    }
+  ]
+}
