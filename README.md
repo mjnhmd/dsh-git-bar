@@ -38,7 +38,7 @@ From a Git checkout (pin the commit; add `&path:/plugins/dsh-git-bar` when the
 package is not at the repository root):
 
 ```bash
-dsh plugin --profile desktop add "git+https://github.com/OWNER/dsh-git-bar.git#<40-hex-commit>"
+dsh plugin --profile desktop add "git+https://github.com/mjnhmd/dsh-git-bar.git#d36a82cd20f7dc0011b0e42b9cdc15c17b9a9f0a"
 ```
 
 From npm, or from a local checkout during development:
@@ -52,6 +52,9 @@ The Host half loads at startup, so restart the app after the first install; the
 Client half is served on the next page load.
 
 ## Publish
+
+Market index (add under **插件 → 发现 → 添加索引源**):
+<https://mjnhmd.github.io/dsh-git-bar/market/index.json>
 
 DSH ships no index of its own: a plugin market is a JSON file (format 1) you host
 yourself and add under **插件 → 发现 → 添加索引源**. `docs/market-index.example.json`

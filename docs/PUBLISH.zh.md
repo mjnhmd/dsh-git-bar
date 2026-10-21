@@ -18,6 +18,17 @@ DSH **没有**内建的插件索引源，也没有「提交到官方商店」的
 
 三种可以叠加：先推 Git，再放一份索引，别人既可以直接装、也能在「发现」里看到。
 
+## 已经发布的位置
+
+| 用途 | 地址 |
+|---|---|
+| 源码 | https://github.com/mjnhmd/dsh-git-bar |
+| 直装 spec | `git+https://github.com/mjnhmd/dsh-git-bar.git#d36a82cd20f7dc0011b0e42b9cdc15c17b9a9f0a` |
+| 插件市场索引 | https://mjnhmd.github.io/dsh-git-bar/market/index.json |
+
+「发现」里添加上面那个索引 URL 就能搜到并安装。发新版本时：改 `version` → 提交 → 推 → 用新 commit
+在 `docs/market/index.json` 里**追加**一条 `versions`（别改旧的）→ 再推，Pages 自动重建。
+
 ## 1. 推到 GitHub
 
 仓库里已经有 `package.json`（`engines.dsh: >=0.2.1-rc.2`、`dsh.bundle.patch`、`dsh.client`）、
