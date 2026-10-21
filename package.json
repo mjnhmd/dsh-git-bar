@@ -1,8 +1,8 @@
 {
   "name": "dsh-git-bar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Shows the Session's git repository, branch, working-tree changes, and ahead/behind counts above the composer.",
+  "description": "Shows the Session git context above the composer: repository, branch, changes, ahead/behind and a commit link, with a branch popover and a worktree list.",
   "license": "MIT",
   "author": "mengjingnan",
   "homepage": "https://github.com/mjnhmd/dsh-git-bar#readme",
