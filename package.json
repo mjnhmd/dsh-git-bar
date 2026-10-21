@@ -35,7 +35,11 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "test/*.mjs"
+    "test/*.mjs",
+    "docs/*.md",
+    "docs/*.png",
+    "docs/market/**",
+    "LICENSE"
   ],
   "scripts": {
     "check": "node --check index.js && node --check client.js",
