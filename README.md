@@ -49,7 +49,7 @@ From a Git checkout (pin the commit; add `&path:/plugins/dsh-git-bar` when the
 package is not at the repository root):
 
 ```bash
-dsh plugin --profile desktop add "git+https://github.com/mjnhmd/dsh-git-bar.git#7fe3f1c0f6c842fb4a9c71462e5fdc361bc5aabd"
+dsh plugin --profile desktop add "git+https://github.com/mjnhmd/dsh-git-bar.git#2d3e0408376127196a4c18e8b1e1c79389a166f5"
 ```
 
 From npm, or from a local checkout during development:
