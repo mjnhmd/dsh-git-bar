@@ -117,4 +117,55 @@ stateOverride = { phase: 'loading' }
 assert.equal(registeredComponent(props), null)
 console.log('9 loading renders nothing OK')
 
+// --- 可选中复制 / hash 跳远端 / 工作树入口 ---
+function findAll(node, predicate, out = []) {
+  if (node === null || node === undefined || node === false) return out
+  if (Array.isArray(node)) {
+    for (const child of node) findAll(child, predicate, out)
+    return out
+  }
+  if (typeof node === 'object') {
+    if (predicate(node)) out.push(node)
+    for (const child of node.children ?? []) findAll(child, predicate, out)
+  }
+  return out
+}
+
+// 10. 状态条内的文字必须可以选中复制
+stateOverride = { phase: 'ready', body: { dir: '/tmp/repo', repository } }
+const barNode = findAll(registeredComponent(props), (node) => node.props?.role === 'status')[0]
+assert.ok(barNode !== undefined, 'bar rendered')
+assert.equal(barNode.props.style.userSelect, 'text')
+assert.equal(barNode.props.style.WebkitUserSelect, 'text')
+console.log('10 selectable bar OK')
+
+// 11. 有远端时 hash 是一个打开 commit 页的按钮
+const commitUrl = 'https://github.com/owner/repo/commit/abc123'
+stateOverride = { phase: 'ready', body: { dir: '/tmp/repo', repository: { ...repository, commitUrl } } }
+let shaNode = findAll(registeredComponent(props), (node) => node.props?.['data-git-bar-commit'] !== undefined)[0]
+assert.ok(shaNode !== undefined, 'commit trigger rendered')
+assert.equal(shaNode.type, 'button')
+assert.equal(shaNode.props.title, commitUrl)
+assert.deepEqual(textOf(shaNode), ['a1b2c3d'])
+console.log('11 commit trigger OK')
+
+// 12. 没有远端时 hash 退回纯文本
+stateOverride = { phase: 'ready', body: { dir: '/tmp/repo', repository: { ...repository, commitUrl: null } } }
+const bare = registeredComponent(props)
+assert.equal(findAll(bare, (node) => node.props?.['data-git-bar-commit'] !== undefined).length, 0)
+assert.ok(findAll(bare, (node) => node.type === 'span' && textOf(node).join('') === 'a1b2c3d').length > 0, 'hash is plain text')
+console.log('12 no remote: plain hash OK')
+
+// 13. 工作树标签是弹层按钮；只有一个工作树时不出现
+let wtNode = findAll(registeredComponent(props), (node) => node.props?.['data-git-bar-worktrees-trigger'] !== undefined)[0]
+assert.ok(wtNode !== undefined, 'worktree trigger rendered')
+assert.equal(wtNode.type, 'button')
+assert.equal(wtNode.props['aria-haspopup'], 'dialog')
+stateOverride = { phase: 'ready', body: { dir: '/tmp/main', repository: { ...repository, worktree: { linked: false, mainRoot: '/tmp/main', count: 3 } } } }
+wtNode = findAll(registeredComponent(props), (node) => node.props?.['data-git-bar-worktrees-trigger'] !== undefined)[0]
+assert.deepEqual(textOf(wtNode), ['T:worktree.count'])
+stateOverride = { phase: 'ready', body: { dir: '/tmp/main', repository: { ...repository, worktree: { linked: false, mainRoot: '/tmp/main', count: 1 } } } }
+assert.equal(findAll(registeredComponent(props), (node) => node.props?.['data-git-bar-worktrees-trigger'] !== undefined).length, 0)
+console.log('13 worktree trigger OK')
+
 console.log('\nALL CLIENT TESTS PASSED')

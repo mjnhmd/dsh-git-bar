@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "check": "node --check index.js && node --check client.js",
-    "test": "node test/host.test.mjs && node test/client.test.mjs"
+    "test": "node test/host.test.mjs && node test/client.test.mjs && node test/interaction.test.mjs"
   },
   "dsh": {
     "bundle": {

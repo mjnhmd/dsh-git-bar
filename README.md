@@ -14,8 +14,11 @@ the Session's git context:
   is not on a branch
 - working-tree change totals (staged / unstaged / untracked in the tooltip)
 - ahead/behind counts against the upstream branch
-- short commit id, and a `链接工作树` / `linked worktree` marker when the
-  directory is a linked `git worktree`
+- short commit id — clickable, opening that commit on the origin remote
+  (GitHub, GitLab and Bitbucket commit routes are all handled) — and a
+  `链接工作树` / `linked worktree` marker when the directory is a linked
+  `git worktree`, or a `N 个工作树` marker when the repository has more than one
+- every label is plain text: select it and copy it
 
 The row refreshes every 8 seconds, on window focus, and when the Session
 changes. Reading it never touches the repository; two interactions deliberately
@@ -26,7 +29,15 @@ do:
   out or create a new branch from the current HEAD;
 - **click the change count** — opens the working tree in the right-hand Sidebar
   as a `工作区改动` tab: the changed files, and the unified diff of the file you
-  pick, untracked files included (diffed against `/dev/null`).
+  pick, untracked files included (diffed against `/dev/null`);
+- **click the worktree marker** — lists every worktree of the repository with its
+  branch and change count. `在此新建会话` opens a new Session in that worktree's
+  directory (a worktree is a directory, so a Session is never moved between
+  them), and `复制路径` copies it. A branch already checked out in another
+  worktree is greyed out in the branch popover with the worktree that holds it,
+  instead of failing with git's `already checked out` after the click.
+- nothing here silently scrolls away: a drag that selects text does not also open
+  a popover.
 
 ![branch popover](docs/preview-branches.png)
 
@@ -71,11 +82,21 @@ repository, publishing to npm, and publishing the index.
 - the directory comes from the Session store first; `dir` is only a fallback for
   a Session the store does not know, and must be absolute;
 - replies with `{ dir, repository: null | { root, name, branch, detached, sha,
-  dirty: { changed, staged, unstaged, untracked }, upstream, ahead, behind,
-  worktree: { linked, mainRoot } } }`.
+  commitUrl, remote, dirty: { changed, staged, unstaged, untracked }, upstream,
+  ahead, behind, worktree: { linked, mainRoot, count } } }`;
+- `commitUrl` is derived from the `origin` remote: the scp, `ssh://`, `git://`
+  and http(s) forms all normalize to `https://host/owner/repo`, and the commit
+  route follows the host (GitHub `/commit/`, GitLab `/-/commit/`, Bitbucket
+  `/commits/`). A local-path remote yields `null` and the id stays plain text.
 
 `GET /dsh-git-bar/branches?sessionId=<id>` — `{ branches: [{ name, current,
-upstream, ahead, behind, subject }], dirty }`.
+upstream, ahead, behind, subject, checkedOutIn }], dirty }`, where
+`checkedOutIn` is the worktree path holding that branch (a branch can only be
+checked out in one worktree at a time).
+
+`GET /dsh-git-bar/worktrees?sessionId=<id>` — `{ root, worktrees: [{ path, name,
+branch, detached, sha, bare, locked, prunable, main, current, dirty }] }`, each
+worktree costing one `status` call for its own change count.
 
 `POST /dsh-git-bar/branches/checkout` `{ sessionId, branch }` — `{ branch,
 created: false }`; 409 when git refuses (local changes, unknown branch).

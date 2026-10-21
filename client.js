@@ -33,6 +33,9 @@ window.__ModuleLoader__.load({
     const CHECKOUT_ROUTE = '/dsh-git-bar/branches/checkout'
     /** Host route creating and checking out a new branch. */
     const CREATE_ROUTE = '/dsh-git-bar/branches/create'
+
+    /** 列出本仓库所有工作树。 */
+    const WORKTREES_ROUTE = '/dsh-git-bar/worktrees'
     /** Host route listing the working tree. */
     const CHANGES_ROUTE = '/dsh-git-bar/changes'
     /** Host route rendering one file's unified diff. */
@@ -78,6 +81,20 @@ window.__ModuleLoader__.load({
       'label.worktree': '链接工作树',
       'label.ahead': '待推送',
       'label.behind': '待拉取',
+      'worktree.open': '查看工作树',
+      'worktree.create': '在此新建会话',
+      'worktree.copy': '复制路径',
+      'worktree.copied': '已复制',
+      'worktree.current': '当前',
+      'worktree.main': '主',
+      'worktree.notWorkspace': '该目录还不是工作区',
+      'worktree.unsupported': '这台机器无法新建会话',
+      'worktree.loading': '正在读取工作树…',
+      'worktree.failed': '读取工作树失败',
+      'worktree.clean': '干净',
+      'worktree.dirty': '{count} 处改动',
+      'worktree.count': '{count} 个工作树',
+      'menu.occupied': '已在 {name} 中使用',
     }
 
     /** English dictionary, checked complete against the zh key set. */
@@ -114,6 +131,20 @@ window.__ModuleLoader__.load({
       'label.worktree': 'linked worktree',
       'label.ahead': 'ahead',
       'label.behind': 'behind',
+      'worktree.open': 'Worktrees',
+      'worktree.create': 'New session here',
+      'worktree.copy': 'Copy path',
+      'worktree.copied': 'Copied',
+      'worktree.current': 'current',
+      'worktree.main': 'main',
+      'worktree.notWorkspace': 'not a workspace yet',
+      'worktree.unsupported': 'cannot create a session here',
+      'worktree.loading': 'Reading worktrees…',
+      'worktree.failed': 'Could not read worktrees',
+      'worktree.clean': 'clean',
+      'worktree.dirty': '{count} changed',
+      'worktree.count': '{count} worktrees',
+      'menu.occupied': 'checked out in {name}',
     }
 
     const styles = {
@@ -160,7 +191,9 @@ window.__ModuleLoader__.load({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
-        userSelect: 'none',
+        // 这一行只是展示，文字要能被选中、复制。
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
       },
       branch: {
         display: 'inline-flex',
@@ -280,6 +313,23 @@ window.__ModuleLoader__.load({
       },
       menuItemActive: {
         background: 'var(--dsw-alias-bg-layer-2, rgba(17, 24, 39, 0.06))',
+      },
+      menuItemDisabled: {
+        opacity: 0.45,
+        cursor: 'not-allowed',
+      },
+      worktreeAction: {
+        font: 'inherit',
+        fontSize: '11px',
+        lineHeight: '18px',
+        padding: '0 8px',
+        borderRadius: '6px',
+        border: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        background: 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
       },
       menuName: {
         minWidth: 0,
@@ -459,6 +509,17 @@ window.__ModuleLoader__.load({
     }
 
     /** Last path segment of an absolute path, for the not-a-repository row. */
+    /**
+     * Compare two directories for equality, ignoring a trailing separator.
+     * @param left - one path.
+     * @param right - the other path.
+     * @returns true when both name the same directory textually.
+     */
+    function samePath(left, right) {
+      const strip = (value) => String(value ?? '').replace(/[\\/]+$/, '')
+      return strip(left) !== '' && strip(left) === strip(right)
+    }
+
     function leafName(path) {
       if (typeof path !== 'string' || path === '') return ''
       const trimmed = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
@@ -513,6 +574,33 @@ window.__ModuleLoader__.load({
      * component's actions, so this function stays a pure view.
      * @param props - menu state, translator, and actions.
      */
+    /**
+     * True while a text selection exists.
+     *
+     * 这一行的文字是可以选中复制的，而拖选结束时浏览器也会派发 click；
+     * 没有这个守卫，选一段文字就会顺手弹出菜单或跳走。
+     */
+    function selectionActive() {
+      try {
+        const selection = window.getSelection()
+        return selection !== null && selection !== undefined && String(selection).trim() !== ''
+      } catch {
+        return false
+      }
+    }
+
+    /**
+     * Open a URL the way the chat view does: a new tab, never this window.
+     * @param url - absolute http(s) URL.
+     */
+    function openExternal(url) {
+      try {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      } catch (error) {
+        console.warn('[dsh-git-bar] 无法打开链接:', String(error?.message ?? error))
+      }
+    }
+
     function BranchMenu(props) {
       const { data, t, actions } = props
       const nodeRef = React.useRef(null)
@@ -582,7 +670,8 @@ window.__ModuleLoader__.load({
         if (event.key === 'Enter') {
           event.preventDefault()
           const branch = matches[index]
-          if (branch !== undefined) {
+          const occupied = typeof branch?.checkedOutIn === 'string' && branch.checkedOutIn !== '' && branch.current !== true
+          if (branch !== undefined && !occupied) {
             if (branch.current === true) actions.close()
             else actions.pick(branch.name)
           }
@@ -591,24 +680,46 @@ window.__ModuleLoader__.load({
 
       const rows = matches.map((branch, position) => {
         const isCurrent = branch.current === true
-        const style = position === index ? { ...styles.menuItem, ...styles.menuItemActive } : styles.menuItem
+        // 一个分支同一时刻只能被一个工作树 checkout：这里提前标灰，
+        // 免得用户点下去只等到一句笼统的“切换失败”。
+        const occupied =
+          !isCurrent && typeof branch.checkedOutIn === 'string' && branch.checkedOutIn !== ''
+            ? branch.checkedOutIn
+            : null
+        const style =
+          occupied !== null
+            ? { ...styles.menuItem, ...styles.menuItemDisabled }
+            : position === index
+              ? { ...styles.menuItem, ...styles.menuItemActive }
+              : styles.menuItem
         const note = isCurrent
           ? h(
               'span',
               { style: { fontSize: '11px', color: 'var(--dsw-alias-label-tertiary, #9ca3af)' } },
               data.dirtyCount > 0 ? t('menu.dirty', { count: data.dirtyCount }) : t('menu.clean'),
             )
-          : null
+          : occupied !== null
+            ? h(
+                'span',
+                { style: { fontSize: '11px', color: 'var(--dsw-alias-label-tertiary, #9ca3af)' } },
+                t('menu.occupied', { name: leafName(occupied) }),
+              )
+            : null
         return h(
           'button',
           {
             key: branch.name,
             type: 'button',
             'data-branch': branch.name,
+            'data-branch-occupied': occupied === null ? undefined : leafName(occupied),
             style,
-            title: branch.name,
-            onMouseEnter: () => actions.move(position),
+            disabled: occupied !== null,
+            title: occupied === null ? branch.name : t('menu.occupied', { name: leafName(occupied) }),
+            onMouseEnter: () => {
+              if (occupied === null) actions.move(position)
+            },
             onClick: () => {
+              if (occupied !== null) return
               if (isCurrent) actions.close()
               else actions.pick(branch.name)
             },
@@ -722,6 +833,141 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 工作树列表：本仓库的每个工作树一行，当前这个打勾。
+     *
+     * 一个工作树就是一个目录，所以这里的动作是「在那个目录里开新会话」，
+     * 而不是把当前会话搬过去 —— 会话的 cwd 建好就固定了。
+     *
+     * @param props - 弹层数据、翻译器，以及行动作。
+     */
+    function WorktreeMenu(props) {
+      const { data, t, actions } = props
+      const nodeRef = React.useRef(null)
+      const [anchor, setAnchor] = React.useState(data.anchor)
+      const [copied, setCopied] = React.useState('')
+
+      React.useEffect(() => {
+        const measure = () => {
+          const trigger = data.trigger
+          if (trigger === null || trigger === undefined) return
+          if (typeof trigger.getBoundingClientRect !== 'function') return
+          const rect = trigger.getBoundingClientRect()
+          setAnchor({
+            bottom: Math.round(window.innerHeight - rect.top + 6),
+            right: Math.round(Math.max(window.innerWidth - rect.right, 8)),
+          })
+        }
+        measure()
+        window.addEventListener('resize', measure)
+        return () => window.removeEventListener('resize', measure)
+      }, [data.trigger])
+
+      React.useEffect(() => {
+        const onPointerDown = (event) => {
+          const node = nodeRef.current
+          if (node !== null && node !== undefined && node.contains(event.target)) return
+          const trigger = data.trigger
+          if (trigger !== null && trigger !== undefined && trigger.contains?.(event.target)) return
+          actions.close()
+        }
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') actions.close()
+        }
+        document.addEventListener('mousedown', onPointerDown, true)
+        document.addEventListener('keydown', onKeyDown)
+        return () => {
+          document.removeEventListener('mousedown', onPointerDown, true)
+          document.removeEventListener('keydown', onKeyDown)
+        }
+      }, [data.trigger, actions])
+
+      const rows = (data.worktrees ?? []).map((entry) => {
+        const marks = []
+        if (entry.main === true) marks.push(t('worktree.main'))
+        if (entry.current === true) marks.push(t('worktree.current'))
+        const dirty =
+          entry.dirty === null || entry.dirty === undefined
+            ? ''
+            : entry.dirty.changed > 0
+              ? t('worktree.dirty', { count: entry.dirty.changed })
+              : t('worktree.clean')
+        const meta = [
+          entry.branch === null || entry.branch === undefined ? t('label.detached') : entry.branch,
+          dirty,
+        ]
+          .filter((part) => part !== '')
+          .join(' · ')
+        return h(
+          'div',
+          {
+            key: entry.path,
+            style: { ...styles.menuItem, cursor: 'default' },
+            title: entry.path,
+            'data-worktree': entry.path,
+          },
+          h(
+            'span',
+            { style: { display: 'flex', flexDirection: 'column', minWidth: 0, textAlign: 'left', flex: '1 1 auto' } },
+            h('span', { style: styles.menuName }, entry.name + (marks.length === 0 ? '' : ` · ${marks.join(' / ')}`)),
+            h('span', { style: { ...styles.menuNote, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, meta),
+          ),
+          entry.current === true || entry.prunable === true
+            ? null
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  style: styles.worktreeAction,
+                  'data-worktree-open': entry.path,
+                  onClick: () => actions.open(entry.path),
+                },
+                t('worktree.create'),
+              ),
+          h(
+            'button',
+            {
+              type: 'button',
+              style: styles.worktreeAction,
+              'data-worktree-copy': entry.path,
+              onClick: async () => {
+                const ok = await actions.copy(entry.path)
+                setCopied(ok === true ? entry.path : '')
+              },
+            },
+            copied === entry.path ? t('worktree.copied') : t('worktree.copy'),
+          ),
+        )
+      })
+
+      const body =
+        data.phase === 'loading'
+          ? h('div', { style: styles.menuHint }, t('worktree.loading'))
+          : data.phase === 'error'
+            ? h('div', { style: styles.menuError }, data.error === '' ? t('worktree.failed') : data.error)
+            : rows.length === 0
+              ? h('div', { style: styles.menuHint }, t('label.unavailable'))
+              : h('div', { style: styles.menuList }, rows)
+
+      return h(
+        'div',
+        {
+          ref: nodeRef,
+          style: { ...styles.menu, bottom: `${anchor.bottom}px`, right: `${anchor.right}px` },
+          role: 'dialog',
+          'aria-label': t('worktree.open'),
+          'data-dsh-git-bar-worktrees': '',
+        },
+        h(
+          'div',
+          { style: styles.menuSearch },
+          h('span', { style: { ...styles.menuName, fontFamily: 'inherit' } }, t('worktree.open')),
+        ),
+        body,
+        data.error !== '' && data.phase !== 'error' ? h('div', { style: styles.menuError }, data.error) : null,
+      )
+    }
+
+    /**
      * The composer dock row.
      * @param props - `sessionId` from the slot, the directory reader, and the translator.
      */
@@ -731,6 +977,7 @@ window.__ModuleLoader__.load({
       const t = typeof props.t === 'function' ? props.t : fallbackT
       const [view, setView] = React.useState({ phase: 'loading' })
       const [menu, setMenu] = React.useState(null)
+      const [worktreeMenu, setWorktreeMenu] = React.useState(null)
       const [place, setPlace] = React.useState({ mode: 'flow', bottom: 0, width: 0, maxWidth: 0, inset: 0 })
       const reloadRef = React.useRef(null)
       const rowRef = React.useRef(null)
@@ -892,8 +1139,69 @@ window.__ModuleLoader__.load({
         create: () => submitBranch(CREATE_ROUTE, { name: String(menu?.draft ?? '').trim() }),
       }
 
+      const patchWorktreeMenu = (patch) =>
+        setWorktreeMenu((current) => (current === null ? current : { ...current, ...patch }))
+
+      const loadWorktrees = async () => {
+        const query = new URLSearchParams({ sessionId })
+        const cwd = readCwd()
+        if (typeof cwd === 'string' && cwd !== '') query.set('dir', cwd)
+        try {
+          const response = await fetch(`${WORKTREES_ROUTE}?${query.toString()}`, {
+            headers: { accept: 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+          })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const body = await response.json()
+          patchWorktreeMenu({
+            phase: 'ready',
+            worktrees: Array.isArray(body.worktrees) ? body.worktrees : [],
+            error: body.reason === 'not-a-repository' ? t('label.unavailable') : '',
+          })
+        } catch (error) {
+          patchWorktreeMenu({
+            phase: 'error',
+            worktrees: [],
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      const openWorktreeMenu = (event) => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        setWorktreeMenu({
+          anchor: {
+            bottom: Math.round(window.innerHeight - rect.top + 6),
+            right: Math.round(Math.max(window.innerWidth - rect.right, 8)),
+          },
+          trigger: event.currentTarget,
+          phase: 'loading',
+          worktrees: [],
+          error: '',
+        })
+        loadWorktrees()
+      }
+
+      const worktreeMenuActions = {
+        close: () => setWorktreeMenu(null),
+        open: async (path) => {
+          patchWorktreeMenu({ error: '' })
+          const result = typeof props.openSessionIn === 'function' ? await props.openSessionIn(path) : 'unsupported'
+          if (result === 'opened') {
+            setWorktreeMenu(null)
+            return
+          }
+          patchWorktreeMenu({
+            error: result === 'not-workspace' ? t('worktree.notWorkspace') : t('worktree.unsupported'),
+          })
+        },
+        copy: (path) => (typeof props.copyText === 'function' ? props.copyText(path) : Promise.resolve(false)),
+      }
+
       React.useEffect(() => {
         setMenu(null)
+        setWorktreeMenu(null)
         if (typeof sessionId !== 'string' || sessionId === '') {
           setView({ phase: 'idle' })
           return undefined
@@ -1004,7 +1312,11 @@ window.__ModuleLoader__.load({
             'aria-haspopup': 'dialog',
             'aria-expanded': menu === null ? 'false' : 'true',
             'data-git-bar-trigger': '',
-            onClick: menu === null ? openMenu : () => setMenu(null),
+            onClick: (event) => {
+              if (selectionActive()) return
+              if (menu === null) openMenu(event)
+              else setMenu(null)
+            },
           },
           h(BranchIcon),
           h(
@@ -1036,6 +1348,7 @@ window.__ModuleLoader__.load({
               },
               title: t('changes.open'),
               onClick: () => {
+                if (selectionActive()) return
                 if (typeof props.openChanges === 'function') props.openChanges()
               },
             },
@@ -1067,25 +1380,82 @@ window.__ModuleLoader__.load({
         )
       }
 
-      if (repository.worktree !== null && repository.worktree !== undefined && repository.worktree.linked) {
+      const worktreeInfo = repository.worktree ?? null
+      const worktreeCount = typeof worktreeInfo?.count === 'number' ? worktreeInfo.count : 1
+      if (worktreeInfo !== null && (worktreeInfo.linked === true || worktreeCount > 1)) {
         segments.push(
           h(
-            'span',
-            { key: 'worktree', style: styles.badge, title: repository.worktree.mainRoot ?? '' },
-            t('label.worktree'),
+            'button',
+            {
+              key: 'worktree',
+              type: 'button',
+              'data-git-bar-worktrees-trigger': '',
+              style: {
+                ...styles.badge,
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                background: 'none',
+                font: 'inherit',
+                cursor: 'pointer',
+              },
+              title: t('worktree.open'),
+              'aria-haspopup': 'dialog',
+              'aria-expanded': worktreeMenu === null ? 'false' : 'true',
+              onClick: (event) => {
+                if (selectionActive()) return
+                if (worktreeMenu === null) openWorktreeMenu(event)
+                else setWorktreeMenu(null)
+              },
+            },
+            worktreeInfo.linked === true ? t('label.worktree') : t('worktree.count', { count: worktreeCount }),
           ),
         )
       }
 
       if (typeof repository.sha === 'string' && repository.sha !== '') {
+        const commitUrl = typeof repository.commitUrl === 'string' && repository.commitUrl !== '' ? repository.commitUrl : null
         segments.push(
-          h('span', { key: 'sha', style: styles.muted, title: repository.sha }, repository.sha),
+          commitUrl === null
+            ? h('span', { key: 'sha', style: styles.muted, title: repository.sha }, repository.sha)
+            : h(
+                'button',
+                {
+                  key: 'sha',
+                  type: 'button',
+                  'data-git-bar-commit': '',
+                  style: {
+                    ...styles.muted,
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    background: 'none',
+                    font: 'inherit',
+                    cursor: 'pointer',
+                  },
+                  title: commitUrl,
+                  onClick: () => {
+                    if (selectionActive()) return
+                    openExternal(commitUrl)
+                  },
+                  onMouseEnter: (event) => {
+                    event.currentTarget.style.textDecoration = 'underline'
+                  },
+                  onMouseLeave: (event) => {
+                    event.currentTarget.style.textDecoration = 'none'
+                  },
+                },
+                repository.sha,
+              ),
         )
       }
 
       const children = join(segments)
       if (menu !== null) {
         children.push(h(BranchMenu, { key: 'menu', data: menu, t, actions: menuActions }))
+      }
+      if (worktreeMenu !== null) {
+        children.push(h(WorktreeMenu, { key: 'worktree-menu', data: worktreeMenu, t, actions: worktreeMenuActions }))
       }
       return Row(children, rowStyle, rowRef, barStyle)
     }
@@ -1373,6 +1743,61 @@ window.__ModuleLoader__.load({
       // 侧边栏服务可能晚于本插件就绪，先试一次，失败则在打开时补注册。
       ensureChangesTab()
 
+      /**
+       * 在一个工作树目录里开新会话。
+       *
+       * 会话的 cwd 在创建时就固定了，所以这里不是“移动当前会话”，而是让宿主
+       * 在那个目录里开一个：目录必须已经是工作区，`uiWorkspace.openWorkspace`
+       * 会建会话并直接导航过去。
+       *
+       * @param path - 工作树的绝对路径。
+       * @returns `opened`、`not-workspace` 或 `unsupported`。
+       */
+      const openSessionIn = async (path) => {
+        const workspaces = service(ctx, 'workspaces')
+        const uiWorkspace = service(ctx, 'uiWorkspace')
+        const items = workspaces?.list?.getSnapshot?.().items
+        const target = (Array.isArray(items) ? items : []).find((item) => samePath(item.path, path))
+        if (target === undefined) return 'not-workspace'
+        if (uiWorkspace === undefined || typeof uiWorkspace.openWorkspace !== 'function') return 'unsupported'
+        try {
+          await uiWorkspace.openWorkspace(target.workspaceId)
+          return 'opened'
+        } catch (error) {
+          console.warn('[dsh-git-bar] 无法在该工作树中新建会话:', String(error?.message ?? error))
+          return 'unsupported'
+        }
+      }
+
+      /** 复制一段文字到系统剪贴板，没有 Clipboard API 时退回 execCommand。 */
+      const copyText = async (text) => {
+        const value = String(text ?? '')
+        if (value === '') return false
+        try {
+          if (navigator?.clipboard !== undefined && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(value)
+            return true
+          }
+        } catch {
+          // 落到下面的兼容路径：无 HTTPS 或权限被拒时仍能复制。
+        }
+        try {
+          const area = document.createElement('textarea')
+          area.value = value
+          area.style.position = 'fixed'
+          area.style.top = '-1000px'
+          area.style.opacity = '0'
+          document.body.appendChild(area)
+          area.focus()
+          area.select()
+          const ok = typeof document.execCommand === 'function' ? document.execCommand('copy') : false
+          document.body.removeChild(area)
+          return ok === true
+        } catch {
+          return false
+        }
+      }
+
       const register = () =>
         ctx.slots.register(
           {
@@ -1384,6 +1809,8 @@ window.__ModuleLoader__.load({
               sessionId,
               readCwd: () => readCwdFor(sessionId),
               openChanges: () => openChangesFor(sessionId),
+              openSessionIn,
+              copyText,
               t,
             }),
           },

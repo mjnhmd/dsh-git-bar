@@ -48,11 +48,12 @@ const ctx = {
 apply(ctx)
 assert.equal(name, 'dsh-git-bar')
 assert.deepEqual(inject, ['webServer'])
-assert.equal(routes.length, 6)
+assert.equal(routes.length, 7)
 assert.ok(routes.every((route) => route.kind === 'exact'))
 assert.deepEqual(routes.map((route) => route.path), [
   '/dsh-git-bar/info',
   '/dsh-git-bar/branches',
+  '/dsh-git-bar/worktrees',
   '/dsh-git-bar/changes',
   '/dsh-git-bar/diff',
   '/dsh-git-bar/branches/checkout',
@@ -61,6 +62,7 @@ assert.deepEqual(routes.map((route) => route.path), [
 assert.deepEqual(effects, [
   'git-bar: GET /dsh-git-bar/info',
   'git-bar: GET /dsh-git-bar/branches',
+  'git-bar: GET /dsh-git-bar/worktrees',
   'git-bar: GET /dsh-git-bar/changes',
   'git-bar: GET /dsh-git-bar/diff',
   'git-bar: POST /dsh-git-bar/branches/checkout',
@@ -106,6 +108,7 @@ assert.equal(r.json.repository.dirty.staged, 0)
 assert.equal(r.json.repository.dirty.unstaged, 1)
 assert.match(r.json.repository.sha, /^[0-9a-f]{7,}$/)
 assert.equal(r.json.repository.worktree.linked, false)
+assert.equal(r.json.repository.worktree.count, 1)
 console.log('1 repo dirty OK', JSON.stringify(r.json.repository.dirty))
 
 // 2. clean repository has zero changes
@@ -119,6 +122,7 @@ r = await call(`/dsh-git-bar/info?dir=${dirParam(wt)}`)
 assert.equal(r.json.repository.branch, 'worktree-test')
 assert.equal(r.json.repository.worktree.linked, true)
 assert.equal(r.json.repository.worktree.mainRoot, realpathSync(borrowed))
+assert.equal(r.json.repository.worktree.count, 2)
 console.log('3 linked worktree OK', r.json.repository.branch, r.json.repository.worktree)
 
 // 4. non-repository directory
@@ -205,6 +209,7 @@ assert.deepEqual(r.json.branches[0], {
   ahead: 0,
   behind: 0,
   subject: 'first',
+  checkedOutIn: realpathSync(flow),
 })
 assert.deepEqual(r.json.dirty, { changed: 0, staged: 0, unstaged: 0, untracked: 0 })
 console.log('13 branch list OK', r.json.branches.map((branch) => branch.name).join(','))
@@ -492,6 +497,82 @@ assert.equal(r.status, 503)
 assert.deepEqual(r.json, { error: 'no-connection' })
 connected = true
 console.log('32 no-connection OK')
+
+// 33. every worktree of the repository is described, main and current flagged
+const mainPath = realpathSync(borrowed)
+const wtPath = realpathSync(wt)
+r = await call(`/dsh-git-bar/worktrees?dir=${dirParam(borrowed)}`)
+assert.equal(r.status, 200)
+assert.equal(r.json.worktrees.length, 2)
+const [mainEntry, linkedEntry] = r.json.worktrees
+assert.equal(mainEntry.path, mainPath)
+assert.equal(mainEntry.main, true)
+assert.equal(mainEntry.current, true)
+assert.equal(linkedEntry.path, wtPath)
+assert.equal(linkedEntry.name, 'borrowed-wt')
+assert.equal(linkedEntry.branch, 'worktree-test')
+assert.equal(linkedEntry.main, false)
+assert.equal(linkedEntry.current, false)
+assert.equal(linkedEntry.dirty.changed, 0)
+console.log('33 worktrees listed OK')
+
+// 34. the current worktree follows the directory, and changes are read per worktree
+writeFileSync(join(wt, 'wt-dirty.txt'), 'changed in the worktree\n')
+r = await call(`/dsh-git-bar/worktrees?dir=${dirParam(wt)}`)
+const linkedNow = r.json.worktrees.find((entry) => entry.path === wtPath)
+const mainNow = r.json.worktrees.find((entry) => entry.path === mainPath)
+assert.equal(linkedNow.current, true)
+assert.equal(linkedNow.main, false)
+assert.equal(linkedNow.dirty.changed, 1)
+assert.equal(mainNow.current, false)
+assert.equal(mainNow.dirty.changed, 0)
+console.log('34 per-worktree changes OK', linkedNow.dirty.changed)
+
+// 35. a branch checked out in another worktree names that worktree
+r = await call(`/dsh-git-bar/branches?dir=${dirParam(wt)}`)
+const byName = new Map(r.json.branches.map((branch) => [branch.name, branch]))
+assert.equal(byName.get('worktree-test').checkedOutIn, wtPath)
+assert.equal(byName.get('worktree-test').current, true)
+assert.equal(byName.get('main').checkedOutIn, mainPath)
+assert.equal(byName.get('main').current, false)
+console.log('35 checkedOutIn OK')
+
+// 36. outside a repository the worktree route answers with no list
+r = await call(`/dsh-git-bar/worktrees?dir=${dirParam(plain)}`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json, { dir: plain, reason: 'not-a-repository', worktrees: [] })
+console.log('36 worktrees outside a repository OK')
+
+// 37. the short sha carries a commit URL derived from the origin remote
+const hosted = makeRepo(join(base, 'hosted'))
+GIT(hosted, 'remote', 'add', 'origin', 'git@github.com:owner/repo.git')
+const hostedSha = GIT(hosted, 'rev-parse', 'HEAD').trim()
+r = await call(`/dsh-git-bar/info?dir=${dirParam(hosted)}`)
+assert.equal(r.json.repository.commitUrl, `https://github.com/owner/repo/commit/${hostedSha}`)
+assert.deepEqual(r.json.repository.remote, { url: 'git@github.com:owner/repo.git', webUrl: 'https://github.com/owner/repo' })
+console.log('37 github commit URL OK', r.json.repository.commitUrl)
+
+// 38. https and ssh remotes normalize; GitLab keeps its own commit route
+GIT(hosted, 'remote', 'set-url', 'origin', 'https://gitlab.example.com/group/sub/repo.git')
+r = await call(`/dsh-git-bar/info?dir=${dirParam(hosted)}`)
+assert.equal(r.json.repository.commitUrl, `https://gitlab.example.com/group/sub/repo/-/commit/${hostedSha}`)
+assert.equal(r.json.repository.remote.webUrl, 'https://gitlab.example.com/group/sub/repo')
+GIT(hosted, 'remote', 'set-url', 'origin', 'ssh://git@git.example.com:2222/team/project.git')
+r = await call(`/dsh-git-bar/info?dir=${dirParam(hosted)}`)
+assert.equal(r.json.repository.remote.webUrl, 'https://git.example.com:2222/team/project')
+assert.equal(r.json.repository.commitUrl, `https://git.example.com:2222/team/project/commit/${hostedSha}`)
+console.log('38 remote normalization OK')
+
+// 39. a remote with no browsing URL, and no remote at all, stay unlinked
+GIT(hosted, 'remote', 'set-url', 'origin', join(base, 'somewhere.git'))
+r = await call(`/dsh-git-bar/info?dir=${dirParam(hosted)}`)
+assert.equal(r.json.repository.remote.webUrl, null)
+assert.equal(r.json.repository.commitUrl, null)
+GIT(hosted, 'remote', 'remove', 'origin')
+r = await call(`/dsh-git-bar/info?dir=${dirParam(hosted)}`)
+assert.equal(r.json.repository.remote, null)
+assert.equal(r.json.repository.commitUrl, null)
+console.log('39 unlinked remotes OK')
 
 rmSync(base, { recursive: true, force: true })
 console.log('\nALL HOST TESTS PASSED')

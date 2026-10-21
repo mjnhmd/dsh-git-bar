@@ -1,7 +1,7 @@
 /**
  * dsh-git-bar — Host half.
  *
- * Six JSON routes over the platform `git` executable:
+ * Seven JSON routes over the platform `git` executable:
  *
  *   GET  /dsh-git-bar/info?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/branches?sessionId=<id>[&dir=<absolute path>]
@@ -32,7 +32,8 @@
  */
 
 import { execFile } from 'node:child_process'
-import { basename, isAbsolute } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { basename, isAbsolute, resolve } from 'node:path'
 
 /** Plugin identity, as the Loader row names it. */
 export const name = 'dsh-git-bar'
@@ -45,6 +46,9 @@ const ROUTE_INFO = '/dsh-git-bar/info'
 
 /** Route listing local branches. */
 const ROUTE_BRANCHES = '/dsh-git-bar/branches'
+
+/** Route listing this repository's worktrees. */
+const ROUTE_WORKTREES = '/dsh-git-bar/worktrees'
 
 /** Route switching to an existing branch. */
 const ROUTE_CHECKOUT = '/dsh-git-bar/branches/checkout'
@@ -72,6 +76,9 @@ const DIFF_LIMIT_CHARS = 200_000
 
 /** Largest number of changed files described; the totals still count them all. */
 const MAX_CHANGED_FILES = 500
+
+/** Largest number of worktrees described; a worktree costs one status call. */
+const MAX_WORKTREES = 16
 
 /** How many git child processes a per-file fan-out may keep in flight. */
 const GIT_CONCURRENCY = 8
@@ -149,6 +156,111 @@ function summarizeStatus(text) {
 }
 
 /**
+ * Parse `git worktree list --porcelain` output into one record per worktree.
+ *
+ * Records are separated by a `worktree <path>` line; the members below it are
+ * `HEAD <sha>`, `branch <ref>`, or one of the bare flags. A `locked` or
+ * `prunable` line may carry a reason after the keyword.
+ *
+ * @param text - raw porcelain output.
+ * @returns one record per worktree, in git's order (the main worktree first).
+ */
+function parseWorktrees(text) {
+  const entries = []
+  let current = null
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const space = line.indexOf(' ')
+    const key = space === -1 ? line : line.slice(0, space)
+    const value = space === -1 ? '' : line.slice(space + 1).trim()
+    if (key === 'worktree') {
+      current = { path: value, sha: null, branch: null, detached: false, bare: false, locked: false, prunable: false }
+      entries.push(current)
+      continue
+    }
+    if (current === null) continue
+    if (key === 'HEAD') current.sha = value
+    else if (key === 'branch') current.branch = value.replace(/^refs\/heads\//, '')
+    else if (key === 'detached') current.detached = true
+    else if (key === 'bare') current.bare = true
+    else if (key === 'locked') current.locked = true
+    else if (key === 'prunable') current.prunable = true
+  }
+  return entries
+}
+
+/**
+ * Compare two directories the way git does: by their real path when it exists.
+ * @param value - absolute directory.
+ * @returns the canonical form used for comparisons.
+ */
+function canonicalPath(value) {
+  try {
+    return realpathSync(value)
+  } catch {
+    return resolve(value)
+  }
+}
+
+/**
+ * Turn a git remote URL into the browsing URL of that repository.
+ *
+ * The scp form (`git@host:owner/repo.git`), `ssh://`, `git://` and plain http(s)
+ * all collapse to `https://host/owner/repo`; a local path or `file://` remote
+ * has no browsing URL and yields null. Hosts whose commit route differs are
+ * handled by `commitUrlFor`.
+ *
+ * @param remoteUrl - `git remote get-url` output.
+ * @returns the https browsing URL, or null when the remote is not hostable.
+ */
+function webUrlFor(remoteUrl) {
+  if (typeof remoteUrl !== 'string') return null
+  const value = remoteUrl.trim()
+  if (value === '') return null
+  let host = null
+  let path = null
+  if (/^(?:https?|git|ssh):\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value)
+      if (parsed.hostname === '') return null
+      host = parsed.port === '' ? parsed.hostname : `${parsed.hostname}:${parsed.port}`
+      path = parsed.pathname
+    } catch {
+      return null
+    }
+  } else {
+    // scp 形式：`[user@]host:path`，冒号后不是绝对路径。
+    const scp = /^(?:[\w.-]+@)?([\w.-]+):(?!\/)(.+)$/.exec(value)
+    if (scp === null) return null
+    host = scp[1]
+    path = scp[2]
+  }
+  const clean = path
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/i, '')
+  if (clean === '' || host === null) return null
+  return `https://${host}/${clean}`
+}
+
+/**
+ * The commit page of one revision on a given web host.
+ *
+ * GitHub and Gitea serve `/commit/<sha>`; GitLab inserts `/-/`; Bitbucket uses
+ * the plural `/commits/<sha>`.
+ *
+ * @param webUrl - repository browsing URL, or null.
+ * @param sha - full commit id, or null.
+ * @returns the commit page URL, or null when either half is missing.
+ */
+function commitUrlFor(webUrl, sha) {
+  if (webUrl === null || typeof sha !== 'string' || sha === '') return null
+  if (/bitbucket\./i.test(webUrl)) return `${webUrl}/commits/${sha}`
+  if (/gitlab/i.test(webUrl)) return `${webUrl}/-/commit/${sha}`
+  return `${webUrl}/commit/${sha}`
+}
+
+/**
  * Read the git facts for one directory.
  * @param dir - absolute directory, whether or not it is a repository.
  * @returns the `repository` object sent to the Client half, or null.
@@ -157,13 +269,15 @@ async function repositoryFor(dir) {
   const inside = await runGit(dir, ['rev-parse', '--is-inside-work-tree'])
   if (!inside.ok || inside.out !== 'true') return null
 
-  const [rootResult, symbolicResult, shaResult, statusResult, upstreamResult, worktreeResult] = await Promise.all([
+  const [rootResult, symbolicResult, shaResult, fullShaResult, statusResult, upstreamResult, worktreeResult, remoteResult] = await Promise.all([
     runGit(dir, ['rev-parse', '--show-toplevel']),
     runGit(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
     runGit(dir, ['rev-parse', '--short', 'HEAD']),
+    runGit(dir, ['rev-parse', 'HEAD']),
     runGit(dir, ['status', '--porcelain=v1', '-uall'], { trim: false }),
     runGit(dir, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']),
     runGit(dir, ['worktree', 'list', '--porcelain']),
+    runGit(dir, ['remote', 'get-url', 'origin']),
   ])
 
   const root = rootResult.ok && rootResult.out !== '' ? rootResult.out : dir
@@ -184,8 +298,8 @@ async function repositoryFor(dir) {
     }
   }
 
-  const worktrees = worktreeResult.ok ? worktreeResult.out : ''
-  const mainRoot = /^worktree (.+)$/m.exec(worktrees)?.[1]?.trim() ?? null
+  const worktrees = worktreeResult.ok ? parseWorktrees(worktreeResult.out) : []
+  const mainRoot = worktrees[0]?.path ?? null
 
   return {
     root,
@@ -193,6 +307,14 @@ async function repositoryFor(dir) {
     branch,
     detached: branch === null,
     sha: shaResult.ok && shaResult.out !== '' ? shaResult.out : null,
+    // 状态条最右边那个短 sha 点开就是远端仓库的这一次提交。
+    commitUrl: commitUrlFor(
+      webUrlFor(remoteResult.ok ? remoteResult.out : ''),
+      fullShaResult.ok && fullShaResult.out !== '' ? fullShaResult.out : null,
+    ),
+    remote: remoteResult.ok && remoteResult.out !== ''
+      ? { url: remoteResult.out, webUrl: webUrlFor(remoteResult.out) }
+      : null,
     dirty,
     upstream,
     ahead,
@@ -200,6 +322,7 @@ async function repositoryFor(dir) {
     worktree: {
       linked: mainRoot !== null && mainRoot !== root,
       mainRoot,
+      count: worktrees.length,
     },
   }
 }
@@ -406,8 +529,17 @@ async function validBranchName(dir, value) {
  * @returns the branch list, empty outside a repository.
  */
 async function readBranches(dir) {
-  const refs = await runGit(dir, ['for-each-ref', `--format=${BRANCH_FORMAT}`, 'refs/heads'], { trim: false })
+  const [refs, listed] = await Promise.all([
+    runGit(dir, ['for-each-ref', `--format=${BRANCH_FORMAT}`, 'refs/heads'], { trim: false }),
+    runGit(dir, ['worktree', 'list', '--porcelain']),
+  ])
   if (!refs.ok) return []
+  // 一个分支同一时刻只能被一个工作树 checkout。记下它挂在哪个目录，客户端就能把
+  // 「点下去必然被 git 拒绝」的分支提前标灰，而不是让用户吃一句笼统的“切换失败”。
+  const checkedOut = new Map()
+  for (const entry of listed.ok ? parseWorktrees(listed.out) : []) {
+    if (entry.branch !== null) checkedOut.set(entry.branch, entry.path)
+  }
   const branches = []
   for (const line of refs.out.split('\n')) {
     if (line === '') continue
@@ -420,6 +552,7 @@ async function readBranches(dir) {
       ahead: 0,
       behind: 0,
       subject: subject ?? '',
+      checkedOutIn: checkedOut.get(refname) ?? null,
     })
   }
   branches.sort((left, right) => {
@@ -438,6 +571,46 @@ async function readBranches(dir) {
     if (Number.isFinite(parsedBehind)) branch.behind = parsedBehind
   })
   return branches
+}
+
+/**
+ * Describe every worktree of the repository this directory belongs to.
+ *
+ * Each worktree costs one `status` call for its own change count; a worktree
+ * whose directory is missing or prunable is listed without one. The current
+ * worktree is the one whose real path matches this directory's repository root.
+ *
+ * @param dir - absolute directory inside the repository.
+ * @returns the worktree list, or null outside a repository.
+ */
+async function readWorktrees(dir) {
+  const listed = await runGit(dir, ['worktree', 'list', '--porcelain'])
+  if (!listed.ok) return null
+  const rootResult = await runGit(dir, ['rev-parse', '--show-toplevel'])
+  const root = rootResult.ok && rootResult.out !== '' ? rootResult.out : dir
+  const current = canonicalPath(root)
+  const worktrees = parseWorktrees(listed.out).slice(0, MAX_WORKTREES).map((entry) => ({
+    path: entry.path,
+    name: basename(entry.path),
+    branch: entry.branch,
+    detached: entry.detached,
+    sha: entry.sha,
+    bare: entry.bare,
+    locked: entry.locked,
+    prunable: entry.prunable,
+    main: entry.path === parseWorktrees(listed.out)[0]?.path,
+    current: canonicalPath(entry.path) === current,
+    dirty: null,
+  }))
+  await mapLimit(
+    worktrees.filter((entry) => !entry.bare && !entry.prunable),
+    GIT_CONCURRENCY,
+    async (entry) => {
+      const status = await runGit(entry.path, ['status', '--porcelain=v1', '-uall'], { trim: false })
+      if (status.ok) entry.dirty = summarizeStatus(status.out)
+    },
+  )
+  return { root, worktrees }
 }
 
 /**
@@ -633,7 +806,7 @@ async function servePost(ctx, req, res, slug, run) {
 }
 
 /**
- * Mount the six routes.
+ * Mount the seven routes.
  * @param ctx - plugin context; `webServer` arrives through `inject`.
  */
 export function apply(ctx) {
@@ -669,6 +842,26 @@ export function apply(ctx) {
           }),
       }),
     `git-bar: GET ${ROUTE_BRANCHES}`,
+  )
+
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTE_WORKTREES,
+        handler: (req, res) =>
+          serveGet(ctx, req, res, 'worktrees-failed', async (dir) => {
+            const described = await readWorktrees(dir)
+            return {
+              status: 200,
+              body:
+                described === null
+                  ? { dir, reason: 'not-a-repository', worktrees: [] }
+                  : { dir, root: described.root, worktrees: described.worktrees },
+            }
+          }),
+      }),
+    `git-bar: GET ${ROUTE_WORKTREES}`,
   )
 
   ctx.effect(
