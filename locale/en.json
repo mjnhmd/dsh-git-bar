@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git Bar",
+    "description": "Shows the Session's git repository, branch, working-tree changes, and ahead/behind counts above the composer."
+  }
+}

@@ -1,0 +1,10 @@
+# dsh-git-bar bundle patch.
+#
+# The bundle channel mounts this plugin by appending the row below to the
+# profile's composed tree. The package has no runtime dependency and no build
+# step: the Host half serves one read-only JSON route, and the Client half
+# renders the status row above the composer.
+#
+- insert:
+    - id: git-bar
+      name: 'dsh-git-bar'

@@ -1,0 +1,60 @@
+{
+  "name": "dsh-git-bar",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shows the Session's git repository, branch, working-tree changes, and ahead/behind counts above the composer.",
+  "license": "MIT",
+  "author": "mengjingnan",
+  "homepage": "https://github.com/mjnhmd/dsh-git-bar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mjnhmd/dsh-git-bar.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "git",
+    "branch",
+    "diff",
+    "composer"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "test/*.mjs"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check client.js",
+    "test": "node test/host.test.mjs && node test/client.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

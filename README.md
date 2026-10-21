@@ -1,0 +1,103 @@
+# dsh-git-bar
+
+A DeepSeek Harness bundle that adds one ambient row above the composer showing
+the Session's git context:
+
+```
+⎇ main · dsh-git-bar · 3 处改动 · ↑2 ↓1 · a1b2c3d
+```
+
+![the row, on the same line as the workspace and mode selectors](docs/preview.png)
+
+- repository name and root
+- the branch the Session runs on, or `游离 HEAD` / `detached HEAD` when the HEAD
+  is not on a branch
+- working-tree change totals (staged / unstaged / untracked in the tooltip)
+- ahead/behind counts against the upstream branch
+- short commit id, and a `链接工作树` / `linked worktree` marker when the
+  directory is a linked `git worktree`
+
+The row refreshes every 8 seconds, on window focus, and when the Session
+changes. Reading it never touches the repository; two interactions deliberately
+do:
+
+- **click the branch** — a searchable popover lists every local branch with its
+  upstream, ahead/behind and dirty state, marks the current one, and can check one
+  out or create a new branch from the current HEAD;
+- **click the change count** — opens the working tree in the right-hand Sidebar
+  as a `工作区改动` tab: the changed files, and the unified diff of the file you
+  pick, untracked files included (diffed against `/dev/null`).
+
+![branch popover](docs/preview-branches.png)
+
+![working tree in the sidebar](docs/preview-changes.png)
+
+## Install
+
+From a Git checkout (pin the commit; add `&path:/plugins/dsh-git-bar` when the
+package is not at the repository root):
+
+```bash
+dsh plugin --profile desktop add "git+https://github.com/OWNER/dsh-git-bar.git#<40-hex-commit>"
+```
+
+From npm, or from a local checkout during development:
+
+```bash
+dsh plugin --profile desktop add dsh-git-bar@0.1.0
+dsh plugin --profile desktop add link:/absolute/path/to/plugins/dsh-git-bar
+```
+
+The Host half loads at startup, so restart the app after the first install; the
+Client half is served on the next page load.
+
+## Publish
+
+DSH ships no index of its own: a plugin market is a JSON file (format 1) you host
+yourself and add under **插件 → 发现 → 添加索引源**. `docs/market-index.example.json`
+is a ready template, `scripts/validate-index.mjs` checks it against DSH's own
+validator, and [docs/PUBLISH.zh.md](docs/PUBLISH.zh.md) walks through pushing the
+repository, publishing to npm, and publishing the index.
+
+## Host API
+
+`GET /dsh-git-bar/info?sessionId=<id>[&dir=<absolute path>]`
+
+- admitted through the harness browser session (`ctx.connection.requestRejection`),
+  so it is unreachable without the GUI's own credentials;
+- the directory comes from the Session store first; `dir` is only a fallback for
+  a Session the store does not know, and must be absolute;
+- replies with `{ dir, repository: null | { root, name, branch, detached, sha,
+  dirty: { changed, staged, unstaged, untracked }, upstream, ahead, behind,
+  worktree: { linked, mainRoot } } }`.
+
+`GET /dsh-git-bar/branches?sessionId=<id>` — `{ branches: [{ name, current,
+upstream, ahead, behind, subject }], dirty }`.
+
+`POST /dsh-git-bar/branches/checkout` `{ sessionId, branch }` — `{ branch,
+created: false }`; 409 when git refuses (local changes, unknown branch).
+
+`POST /dsh-git-bar/branches/create` `{ sessionId, name, from? }` — `{ branch,
+created: true }`; the name is validated with `git check-ref-format --branch`.
+
+`GET /dsh-git-bar/changes?sessionId=<id>` — `{ files: [{ path, status, staged,
+additions, deletions }], dirty, truncated }`, capped at 500 files.
+
+`GET /dsh-git-bar/diff?sessionId=<id>&path=<repo-relative>&staged=0|1` — `{ path,
+staged, diff, truncated }`, capped at 200 000 characters.
+
+Every git call uses an argument array (no shell), a 4 s timeout, and a 256 KiB
+buffer cap. Nothing is watched and nothing is cached.
+
+## Layout
+
+| File | Role |
+|---|---|
+| `index.js` | Host half: the read-only JSON route over the `git` executable |
+| `client.js` | Client half: the `conversation.input.dock` row, the branch popover, and the Sidebar tab body |
+| `cordis.patch.yml` | Bundle patch that inserts the `git-bar` row |
+| `locale/*.json` | Display metadata for Plugin Manager / Settings |
+| `icon.svg` | Plugin icon |
+| `docs/PUBLISH.zh.md` | How to distribute the plugin (Git / npm / a market index) |
+| `docs/market-index.example.json` | Format-1 market index template |
+| `scripts/validate-index.mjs` | Rejects an index the way DSH's reader would |
