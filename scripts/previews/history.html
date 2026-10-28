@@ -64,6 +64,7 @@
       <div class="hdetail">
         <div class="dhead"><span class="subject">honor Retry-After on 429</span><span class="hash">7c1a9f2</span></div>
         <div class="dmeta">Noah Lin &lt;noah.lin@acme.test&gt; · 今天 10:18</div>
+        <div class="drefs"><span>分支 / 标签</span><span class="ref head">feat/retry-policy</span><span class="ref remote">origin/feat/retry-policy</span></div>
         <p class="dbody">429 / 503 都带 Retry-After，指数退避只能当兜底。
 先读响应头，解析不出来再回落到退避序列。
 退避上限压到 8s，避免长尾请求把队列堵住。</p>

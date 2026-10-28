@@ -186,6 +186,7 @@ window.__ModuleLoader__.load({
       'history.more': '加载更多提交',
       'history.capped': '已到 {count} 笔上限，缩小筛选范围才能看更早的提交',
       'history.pick': '选一笔提交查看详情',
+      'history.refs': '分支 / 标签',
       'history.files': '变更文件',
       'history.noFiles': '这笔提交没有文件变更',
       'history.diffPick': '选一个文件看它在这笔提交里的改动',
@@ -267,6 +268,7 @@ window.__ModuleLoader__.load({
       'history.more': 'Load more commits',
       'history.capped': 'Stopped at {count} commits — narrow the filter to reach older ones',
       'history.pick': 'Pick a commit to see its detail',
+      'history.refs': 'Branches / tags',
       'history.files': 'Changed files',
       'history.noFiles': 'This commit changes no file',
       'history.diffPick': 'Pick a file to see its change in this commit',
@@ -1985,6 +1987,37 @@ window.__ModuleLoader__.load({
         fontSize: '11px',
         color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
       },
+      // 这笔提交的引用（分支 / 远端分支 / 标签）：完整名字排一行，允许换行；
+      // 与左侧列表上的小徽标不同，这里不截断——用户要照抄的就是这个全名。
+      detailRefs: {
+        flex: 'none',
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: '4px',
+        padding: '0 10px 6px',
+        fontSize: '11px',
+        lineHeight: '16px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+        // 分支名要能被拖选、⌘/Ctrl+C 复制。
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
+        cursor: 'text',
+      },
+      detailRef: {
+        flex: '0 1 auto',
+        maxWidth: '100%',
+        padding: '0 5px',
+        borderRadius: '999px',
+        border: '1px solid currentColor',
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        fontSize: '11px',
+        lineHeight: '16px',
+        overflowWrap: 'anywhere',
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
+        cursor: 'text',
+      },
       detailBody: {
         flex: 'none',
         maxHeight: '132px',
@@ -2309,7 +2342,7 @@ window.__ModuleLoader__.load({
       const [log, setLog] = React.useState({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
       const [filter, setFilter] = React.useState('')
       const [picked, setPicked] = React.useState('')
-      const [detail, setDetail] = React.useState({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
+      const [detail, setDetail] = React.useState({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], refs: [], error: '', truncated: false })
       const [pickedPath, setPickedPath] = React.useState('')
       const [diff, setDiff] = React.useState({ phase: 'idle', text: '', truncated: false })
       const [menu, setMenu] = React.useState('')
@@ -2488,11 +2521,11 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         if (picked === '') {
-          setDetail({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
+          setDetail({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], refs: [], error: '', truncated: false })
           return () => {}
         }
         let live = true
-        setDetail({ phase: 'loading', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
+        setDetail({ phase: 'loading', subject: '', body: '', short: '', author: '', when: '', files: [], refs: [], error: '', truncated: false })
         getJson(COMMIT_ROUTE, { hash: picked })
           .then((body) => {
             if (!live) return
@@ -2504,13 +2537,14 @@ window.__ModuleLoader__.load({
               author: String(body.author ?? ''),
               when: String(body.when ?? ''),
               files: Array.isArray(body.files) ? body.files : [],
+              refs: Array.isArray(body.refs) ? body.refs : [],
               error: '',
               truncated: body.truncated === true,
             })
           })
           .catch((error) => {
             if (!live) return
-            setDetail({ phase: 'failed', subject: '', body: '', short: '', author: '', when: '', files: [], error: error instanceof Error ? error.message : String(error), truncated: false })
+            setDetail({ phase: 'failed', subject: '', body: '', short: '', author: '', when: '', files: [], refs: [], error: error instanceof Error ? error.message : String(error), truncated: false })
           })
         return () => {
           live = false
@@ -2894,6 +2928,27 @@ window.__ModuleLoader__.load({
                     h('span', { style: historyStyles.detailHash }, detail.short),
                   ),
                   h('div', { style: historyStyles.detailMeta }, `${detail.author} · ${formatWhen(detail.when, t)}`),
+                  // 这笔提交被哪些分支 / 标签指着。左侧列表里的徽标会被 `maxWidth` 截断、
+                  // 又在按钮里不好选，所以详情里把全名列出来，且可拖选复制。
+                  detail.refs.length === 0
+                    ? null
+                    : h(
+                        'div',
+                        { style: historyStyles.detailRefs, 'data-history-refs': '' },
+                        h('span', null, t('history.refs')),
+                        detail.refs.map((ref, index) =>
+                          h(
+                            'span',
+                            {
+                              key: `${ref?.name ?? ''}:${index}`,
+                              style: { ...historyStyles.detailRef, color: refBadgeColor(ref?.kind) },
+                              title: String(ref?.name ?? ''),
+                              'data-history-ref': String(ref?.name ?? ''),
+                            },
+                            String(ref?.name ?? ''),
+                          ),
+                        ),
+                      ),
                   detail.body === '' ? null : h('pre', { style: historyStyles.detailBody, 'data-history-body': '' }, detail.body),
                   h('div', { style: historyStyles.section }, t('history.files')),
                   files,

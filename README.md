@@ -51,7 +51,9 @@ usable. The branch dropdown lists every local branch and every remote-tracking
 one (`origin/<branch>`), so a branch that only exists on the remote can still be
 searched for and filtered by; the author list comes from `/authors`, i.e. from
 every commit in the repository, not just the page already loaded. Picking a commit reads its author, time, full
-message and changed files; picking a file reads its unified diff inside that
+message and changed files; the same pane lists the branches and tags that point
+at the commit (the branch `HEAD` sits on, local branches, `origin/<branch>`, tags)
+by their full name, which can be drag-selected and copied; picking a file reads its unified diff inside that
 commit. Scrolling to the bottom loads older commits by itself; there is no
 "load more" button. The tab only reads: no ref, index or worktree is written.
 - nothing here silently scrolls away: a drag that selects text does not also open
@@ -169,7 +171,9 @@ by default, 300 at most; `skip` is how many commits the caller already has, whic
 is how the panel pages through a history longer than one page.
 
 `GET /dsh-git-bar/commit?sessionId=<id>&hash=<4..40 hex>` — `{ dir, hash, short,
-parents, author, email, when, subject, body, files, truncated }`, each file being
+parents, author, email, when, subject, body, refs, files, truncated }`, `refs`
+being `[{ name, kind }]` for every branch or tag pointing at the commit (same
+shape as in `/log`, empty when nothing points at it), each file being
 `{ path, status, additions, deletions, binary }`, capped at 500 files.
 
 `GET /dsh-git-bar/commit-diff?sessionId=<id>&hash=<4..40 hex>&path=<repo-relative>`

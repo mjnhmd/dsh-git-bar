@@ -198,6 +198,16 @@ body {
 .dhead .subject { font-weight: 600; flex: 1 1 auto; min-width: 0; }
 .dhead .hash { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #9ca3af; }
 .dmeta { flex: none; padding: 2px 10px 6px; font-size: 11px; color: #9ca3af; }
+.drefs {
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 0 10px 6px; font-size: 11px; line-height: 16px; color: #9ca3af;
+  user-select: text; cursor: text;
+}
+.drefs .ref {
+  flex: 0 1 auto; max-width: 100%; padding: 0 5px; border-radius: 999px;
+  border: 1px solid currentColor; overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .dbody { flex: none; margin: 0; padding: 0 10px 8px; font-size: 12px; line-height: 18px; white-space: pre-wrap; color: #374151; }
 .dsection { flex: none; padding: 4px 10px; font-size: 11px; font-weight: 600; color: #6b7280; border-top: 1px solid #e5e7eb; }
 .dfiles { flex: 0 1 auto; min-height: 0; padding: 0 4px 4px; }

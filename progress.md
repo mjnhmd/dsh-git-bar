@@ -92,3 +92,13 @@
   （搜 `FEAT` 命中 `origin/feat-x`、搜 `zoe` 命中只在 `/authors` 里的 Zoe）；`npm run check` + `npm test` 全绿。
 - 待确认：重启桌面端后分支下拉能否看到远端分支、能否滚到底。
 - 未做：未升版本、未推送。
+
+## 提交详情显示分支名、可选中复制（第九轮）
+- 已完成：Host `readCommit()` 增返回 `refs`（`git show -s --decorate=full --format=%D` + `parseRefs()`）；
+  Client 详情面板在作者行下面渲染「分支 / 标签」一行，chip 按 kind 上色、全名不截断、可拖选复制；
+  无引用时不渲染空行。中英 README 的 `/commit` 契约与历史页描述同步；`docs/preview-history.png` 重渲染。
+- 已验证：`npm run check`（隐私检查 31 文件无命中）+ `npm test` 全绿；Host 新增 `44b commit refs OK
+  head:main, local:feature/x, tag:v1`；交互新增 `8b no-refs commit OK` 与详情 chip 的 `userSelect/text` 断言。
+- 待确认（要用户操作）：**Host 半要重启 DSH 桌面端**才生效（插件是 `link:` 进 desktop profile，Host 代码在进程里），
+  然后刷新页面才能看到详情里的分支名。
+- 未做：未升版本、未推送。

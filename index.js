@@ -1263,14 +1263,20 @@ function parseNameStatus(text) {
  * has after the change. A path `--numstat` does not mention — a merge commit,
  * whose `--name-status` output is empty anyway — keeps 0/0 and is not binary.
  *
+ * A second `git show` reads the `%D` column, parsed by the same `parseRefs()`
+ * the history rows use: the detail pane shows the branch names a `/log` row
+ * would print as badges, from the commit itself rather than from the loaded page.
+ *
  * @param dir - absolute directory.
  * @param hash - 4..40 hex digits, already validated.
  * @returns `{ commit }` on success, or `{ failure }` holding git's own message.
  */
 async function readCommit(dir, hash) {
-  const [shown, named] = await Promise.all([
+  const [shown, named, decorated] = await Promise.all([
     runGit(dir, ['show', '--no-ext-diff', `--format=${COMMIT_FORMAT}`, '--numstat', hash], { trim: false }),
     runGit(dir, ['diff-tree', '--no-commit-id', '--name-status', '-r', '-M', hash]),
+    // 装饰信息只用于展示：读不到（老 git、奇怪配置）就当这笔提交没被引用，别把详情整体判失败。
+    runGit(dir, ['show', '-s', '--decorate=full', '--format=%D', hash]),
   ])
   if (!shown.ok && !shown.overflow) return { failure: failureMessage(shown) }
   if (!named.ok) return { failure: failureMessage(named) }
@@ -1300,6 +1306,7 @@ async function readCommit(dir, hash) {
       when: fields[5],
       subject: fields[6],
       body: (fields[7] ?? '').trim(),
+      refs: decorated.ok ? parseRefs(decorated.out) : [],
       files,
       truncated: rows.length > MAX_COMMIT_FILES || shown.overflow || named.overflow,
     },

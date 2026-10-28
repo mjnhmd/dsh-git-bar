@@ -168,3 +168,22 @@ GET /dsh-git-bar/authors?sessionId=<id>[&dir=<abs>]
    列表有显式高度且 `overflowY:auto`；缺 `react-dom` 时就地渲染且不报错。
 3. 顶部计数（`N 笔提交`）与页脚跟累积结果一致；到达 `HISTORY_MAX_COMMITS` 时明确提示还有更多。
 4. `npm run check` + `npm test` 全绿，中英 README 的 `/log` 契约同步 `skip`。
+
+## 第九轮：提交详情里显示这笔提交引用的分支名，并且能选中复制（当前任务）
+
+用户（m00003）：「这个提交详情的区域要显示 git 分支 名  同时能让我选中复制这个分支名」
+
+### 目标与验收
+1. Git 历史标签页右侧提交详情里，出现这笔提交引用的分支 / 标签（`HEAD` 所指分支、本地分支、`origin/x`、tag），
+   名字完整显示（不再像左侧列表那样被 `maxWidth: 45%` 截断），按 kind 上色（head 绿 / remote 蓝 / tag 橙 / local 灰）。
+   验收：`node test/interaction.test.mjs` 断言详情里 `data-history-ref` 依次为 `main`、`v1.0`。
+2. 分支名可被鼠标拖选、`⌘/Ctrl+C` 复制：chip 与容器都是 `userSelect: 'text'` + `WebkitUserSelect: 'text'`，
+   `cursor: text`；详情区不是按钮，不需要 `selectionActive()` 守卫。
+   验收：交互测试断言 chip 的 `style.userSelect === 'text'`。
+3. 数据源放在 Host（`GET /dsh-git-bar/commit` 返回 `refs`），由 `git show -s --decorate=full --format=%D` + 现有
+   `parseRefs()` 解析——复用 `%D` 解析，语义与 `/log` 行上的徽标一致；不依赖「这笔提交刚好在已加载的那一页」，
+   切了分支/提交人筛选后详情照样有徽标。
+   验收：`node test/host.test.mjs` 断言 tip 提交 `refs = [{ name: 'main', kind: 'head' }]`、其父提交 `refs = []`。
+4. 无 refs 的提交不渲染空行（不显示标签、不占位）。
+5. 中英 README 的 `/commit` 契约补 `refs`，历史页功能描述补一句「详情里显示引用并可选中复制」。
+6. `npm run check` + `npm test` 全绿。

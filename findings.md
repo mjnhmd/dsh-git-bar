@@ -128,3 +128,24 @@ headless Chrome fixture 复现（14 行真实分支名、`max-height:248px; padd
   `/branches` 回复新增 `remotes` / `remotesTruncated`；Client 把 `body.remotes` 接在本地分支之后塞进筛选选项。
 - `remotes` 只用于提交历史筛选：`/log?branch=origin/feat-x` 走的是 `git log <revision>`（`args.push(filters.branch)`），
   `validBranchFilter()` 的 `BRANCH_PATTERN = /^[A-Za-z0-9._/-]+$/` 接受这种名字；切换/新建分支仍只看 `branches`，语义不变。
+
+## 提交详情显示分支名（第九轮）
+
+- 用户诉求（m00003）：提交详情的右侧面板要能看到 git 分支名，并且能选中复制。左侧列表上的徽标虽然有分支名，
+  但 `historyStyles.refs` 是 `maxWidth: 45%` + `textOverflow: ellipsis`，长分支名被截断；而且行是 `button`，
+  按钮里的文字在部分浏览器里选不动，所以需求落在详情面板而不是列表行。
+- 数据源没用「从已加载的 `log.commits` 里按 hash 找 `refs`」：`applyFilter()` 只重置 `page`，不重置 `picked`，
+  换了分支 / 提交人筛选后选中的提交可能已经不在这一页，那条路会给空数组。改成 Host 在
+  `GET /dsh-git-bar/commit` 里现查，详情永远自带引用。
+- 实现：`readCommit()` 并行多跑一条 `git show -s --decorate=full --format=%D <hash>`，用现成的 `parseRefs()` 解析
+  （与 `/log` 行的徽标同一套 kind：`head` / `local` / `remote` / `tag`）；读失败只当「没有引用」，不让详情整体 404。
+  实测本仓库：`git show -s --decorate=full --format=%D HEAD` → `HEAD -> refs/heads/master`；`HEAD~1` → 空行。
+- 可选中：`detailRefs` / `detailRef` 都写 `userSelect: 'text'` + `WebkitUserSelect: 'text'` + `cursor: 'text'`，
+  这也是状态条那轮（`styles.bar` 的注释「这一行只是展示，文字要能被选中、复制」）的同一套做法；
+  详情区不是按钮，不需要 `selectionActive()` 守卫。
+- 长名字不截断：`maxWidth: '100%'` + `overflowWrap: 'anywhere'`，允许换成两行，宁可难看也不藏字。
+- 预览图：`scripts/previews/history.html` / `style.css` 补 `.drefs` 假数据行，用脚本同一套 Chrome 参数渲染
+  `docs/preview-history.png`（`--headless=new --force-device-scale-factor=2 --window-size=1472,672`），
+  实拍确认「分支 / 标签 feat/retry-policy origin/feat/retry-policy」一行显示正常，颜色与列表徽标一致。
+- 探路记录：`curl http://127.0.0.1:61719/dsh-git-bar/commit?...` 返回 401（web server 要鉴权），
+  所以没把「打真机接口」当证据；Host 的验证靠 `test/host.test.mjs` 里真 git 仓库的 44 / 44b。

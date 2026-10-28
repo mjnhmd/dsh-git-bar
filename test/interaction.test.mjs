@@ -211,6 +211,11 @@ const commitReply = {
   body: 'why this exists',
   author: 'Ada',
   when: '2026-10-27T02:00:00Z',
+  // 详情里要列出的引用：HEAD 所在的分支 + 一个标签，顺序按 Host 给的顺序。
+  refs: [
+    { name: 'main', kind: 'head' },
+    { name: 'v1.0', kind: 'tag' },
+  ],
   truncated: false,
   files: [
     { path: 'src/a.js', status: 'M', additions: 3, deletions: 1, binary: false },
@@ -218,6 +223,7 @@ const commitReply = {
   ],
 }
 const commitDiffReply = { path: 'src/a.js', truncated: false, diff: '@@ -1 +1 @@\n-old line\n+new line\n' }
+let commitMode = 'default'
 // 提交人候选由 /authors 提供：Zoe 只存在于尚未加载的历史里，用来证明候选不依赖当前页。
 let authorsMode = 'ok'
 const authorsReply = {
@@ -268,7 +274,10 @@ globalThis.fetch = async (url) => {
       : { ok: false, status: 404, json: async () => ({}) }
   }
   if (text.startsWith('/dsh-git-bar/commit-diff')) return { ok: true, json: async () => commitDiffReply }
-  if (text.startsWith('/dsh-git-bar/commit')) return { ok: true, json: async () => commitReply }
+  if (text.startsWith('/dsh-git-bar/commit')) {
+    // 'norefs' 模拟「没有任何分支 / 标签指着这笔提交」，详情里不该留一行空引用。
+    return { ok: true, json: async () => (commitMode === 'norefs' ? { ...commitReply, refs: [] } : commitReply) }
+  }
   if (text.startsWith('/dsh-git-bar/log')) return { ok: true, json: async () => (logMode === 'paging' ? pagingReplyFor(text) : logReplyFor(text)) }
   if (text.startsWith('/dsh-git-bar/info')) return { ok: true, json: async () => infoReply }
   return { ok: false, status: 404, json: async () => ({}) }
@@ -452,6 +461,16 @@ assert.ok(fetches.some((url) => url.includes('/dsh-git-bar/commit?') && url.incl
 const subjectNode = findAll(historyTree, (node) => node.props['data-history-subject'] !== undefined)[0]
 assert.ok(subjectNode !== undefined, 'detail subject rendered')
 assert.equal(subjectNode.children.join(''), 'Merge branch feature')
+// 详情里带出这笔提交引用的分支 / 标签，且文字可选（拖选 → ⌘/Ctrl+C 复制分支名）。
+const refChips = findAll(historyTree, (node) => typeof node.props['data-history-ref'] === 'string')
+assert.deepEqual(refChips.map((chip) => chip.props['data-history-ref']), ['main', 'v1.0'])
+assert.ok(textOf(refChips[0]).join('') === 'main', 'branch name rendered as its own chip')
+assert.equal(refChips[0].props.style.userSelect, 'text', 'branch name is selectable')
+assert.equal(refChips[0].props.style.WebkitUserSelect, 'text', 'branch name is selectable (webkit)')
+assert.equal(refChips[0].props.style.cursor, 'text', 'selecting a branch name does not look like a button')
+const refWrap = findAll(historyTree, (node) => node.props['data-history-refs'] !== undefined)[0]
+assert.ok(refWrap !== undefined, 'refs row rendered')
+assert.equal(refWrap.props.style.userSelect, 'text', 'the whole refs row can be drag-selected')
 const fileRows = findAll(historyTree, (node) => typeof node.props['data-history-file'] === 'string')
 assert.deepEqual(fileRows.map((row) => row.props['data-history-file']), ['src/a.js', 'assets/b.bin'])
 assert.ok(textOf(fileRows[0]).join(' ').includes('+3 −1'), 'line counts shown')
@@ -469,6 +488,23 @@ const lines = findAll(diffLines, (node) => node.type === 'div').map((node) => te
 assert.ok(lines.includes('+new line'), JSON.stringify(lines))
 assert.ok(lines.includes('-old line'), JSON.stringify(lines))
 console.log('8 file diff OK:', lines.length, 'lines')
+
+// 8b. 没有任何分支 / 标签指着的提交：详情不渲染空的引用行（不留空白占位）
+commitMode = 'norefs'
+const plainRow = findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string')[1]
+plainRow.props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+assert.equal(
+  findAll(historyTree, (node) => node.props['data-history-refs'] !== undefined).length,
+  0,
+  'a commit no ref points at shows no refs row',
+)
+commitMode = 'default'
+commitRows[0].props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+console.log('8b no-refs commit OK')
 
 // 9. 过滤框只按关键字筛行，不动已选中的提交
 const filterInput = findAll(historyTree, (node) => node.props['data-history-filter'] !== undefined)[0]
