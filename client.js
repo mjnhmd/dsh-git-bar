@@ -107,7 +107,7 @@ window.__ModuleLoader__.load({
       'worktree.copied': '已复制',
       'worktree.current': '当前',
       'worktree.main': '主',
-      'worktree.notWorkspace': '该目录还不是工作区',
+      'worktree.invalidPath': '该目录已不存在，无法新建会话',
       'worktree.unsupported': '这台机器无法新建会话',
       'worktree.loading': '正在读取工作树…',
       'worktree.failed': '读取工作树失败',
@@ -187,7 +187,7 @@ window.__ModuleLoader__.load({
       'worktree.copied': 'Copied',
       'worktree.current': 'current',
       'worktree.main': 'main',
-      'worktree.notWorkspace': 'not a workspace yet',
+      'worktree.invalidPath': 'that directory is gone',
       'worktree.unsupported': 'cannot create a session here',
       'worktree.loading': 'Reading worktrees…',
       'worktree.failed': 'Could not read worktrees',
@@ -589,17 +589,6 @@ window.__ModuleLoader__.load({
     }
 
     /** Last path segment of an absolute path, for the not-a-repository row. */
-    /**
-     * Compare two directories for equality, ignoring a trailing separator.
-     * @param left - one path.
-     * @param right - the other path.
-     * @returns true when both name the same directory textually.
-     */
-    function samePath(left, right) {
-      const strip = (value) => String(value ?? '').replace(/[\\/]+$/, '')
-      return strip(left) !== '' && strip(left) === strip(right)
-    }
-
     function leafName(path) {
       if (typeof path !== 'string' || path === '') return ''
       const trimmed = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
@@ -1273,7 +1262,7 @@ window.__ModuleLoader__.load({
             return
           }
           patchWorktreeMenu({
-            error: result === 'not-workspace' ? t('worktree.notWorkspace') : t('worktree.unsupported'),
+            error: result === 'invalid-path' ? t('worktree.invalidPath') : t('worktree.unsupported'),
           })
         },
         copy: (path) => (typeof props.copyText === 'function' ? props.copyText(path) : Promise.resolve(false)),
@@ -2889,25 +2878,27 @@ window.__ModuleLoader__.load({
        * 在一个工作树目录里开新会话。
        *
        * 会话的 cwd 在创建时就固定了，所以这里不是“移动当前会话”，而是让宿主
-       * 在那个目录里开一个：目录必须已经是工作区，`uiWorkspace.openWorkspace`
-       * 会建会话并直接导航过去。
+       * 在那个目录里开一个。目录不必先注册成工作区：`workspaces.create` 在 host
+       * 侧按 realpath 幂等（同一目录返回已有记录），注册/复用之后
+       * `uiWorkspace.openWorkspace` 会建会话并直接导航过去。
        *
        * @param path - 工作树的绝对路径。
-       * @returns `opened`、`not-workspace` 或 `unsupported`。
+       * @returns `opened`、`invalid-path`（目录已不存在）或 `unsupported`。
        */
       const openSessionIn = async (path) => {
         const workspaces = service(ctx, 'workspaces')
         const uiWorkspace = service(ctx, 'uiWorkspace')
-        const items = workspaces?.list?.getSnapshot?.().items
-        const target = (Array.isArray(items) ? items : []).find((item) => samePath(item.path, path))
-        if (target === undefined) return 'not-workspace'
+        if (typeof workspaces?.create !== 'function') return 'unsupported'
         if (uiWorkspace === undefined || typeof uiWorkspace.openWorkspace !== 'function') return 'unsupported'
         try {
-          await uiWorkspace.openWorkspace(target.workspaceId)
+          const workspace = await workspaces.create({ path })
+          if (typeof workspace?.workspaceId !== 'string' || workspace.workspaceId === '') return 'unsupported'
+          await uiWorkspace.openWorkspace(workspace.workspaceId)
           return 'opened'
         } catch (error) {
           console.warn('[dsh-git-bar] 无法在该工作树中新建会话:', String(error?.message ?? error))
-          return 'unsupported'
+          const code = error?.rpcError?.code ?? error?.code
+          return code === 'workspace/invalid-path' ? 'invalid-path' : 'unsupported'
         }
       }
 

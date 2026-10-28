@@ -32,8 +32,20 @@
   真 git 仓库端到端核对（筛选结果与 `git log` 逐条一致、越界页返回空列表、滚到底续页去重）；
 - 世界索引 200 行已被 0.3.0 覆盖过，0.4.0 条目追加在尾部（升序）。
 
+## 工作树「在此新建会话」修复（本轮）
+- 根因：`openSessionIn` 只在工作区注册表快照里找已有目录，找不到就返回 `not-workspace`，
+  而 git worktree 默认没注册成工作区；
+- 已完成：改为 `workspaces.create({ path })`（host 侧 realpath 幂等）→ `uiWorkspace.openWorkspace(workspaceId)`；
+  新增 `invalid-path` 分支（目录已删除时提示「该目录已不存在，无法新建会话」，弹层留在原地），
+  删掉不再使用的 `samePath` 与 `worktree.notWorkspace` 文案；
+- 已完成：`test/interaction.test.mjs` 补 `workspaces.create` mock 与三条分支（已注册 / 未注册 / 目录已删），
+  断言 requests 序列 `create:/repo`、`open:ws-1`、`create:/repo-hotfix`、`open:ws-3`；
+- 已完成：README 中英同步「未注册目录会先注册成工作区」；
+- 已验证：`npm run check`（31 文件无命中）、`npm test`（Host 52 / Client 21 / 交互 15 步全绿，
+  实测输出 `1 worktree popover OK: 4 rows`、`2 open actions OK: 3`、`3 worktree session OK: 5 host calls`）。
+
 ## 下一步
-等用户重启桌面端确认 UI（滚动自动续页、两个下拉），确认后再单独授权推送。
+等用户重启桌面端确认「在此新建会话」真的在该 worktree 里开出会话，确认后再单独授权推送。
 
 ## 边界
 用户尚未授权本次推送；远端仍是 0.3.0。市场卡片要等社区目录每日构建采集。

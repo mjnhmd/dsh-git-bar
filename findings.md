@@ -20,3 +20,15 @@
   而同机已有路由 `/dsh-git-bar/info` 返回 401（认证层），说明是「路由未注册」而不是「未授权」→ 必须重启应用。
 - 该 GUI 需要 `dsh web` 打印的带 token 地址才能认证，`/` 直接访问返回
   `dsh web authentication required; reopen the URL printed by dsh web.`，所以命令行无法直接截图验证界面。
+
+## 工作树「在此新建会话」报「该目录还不是工作区」（m00003）
+- 报错来源：`client.js` 的 `openSessionIn(path)` 原先只在 `workspaces.list.getSnapshot().items`
+  里按 `samePath(item.path, path)` 找已有工作区，找不到就返回 `'not-workspace'`，弹层据此渲染
+  `worktree.notWorkspace`（「该目录还不是工作区」）。git worktree 目录默认不会出现在工作区注册表里，
+  所以凡是非当前会话目录的工作树都必然命中这条错误——不是偶发。
+- DSH 真实 API：Client 侧有 `workspaces.create({ path })`，host 侧按 realpath 去重（同一目录返回已有记录，
+  不重复注册），拿到 `workspaceId` 后调 `uiWorkspace.openWorkspace(workspaceId)` 即建会话并导航。
+  没有 `workspaces.create` 时按 `unsupported` 处理，不假装成功。
+- 错误分类：host 抛 `workspace/invalid-path`（目录已不存在的场景，如 worktree 已被 `git worktree remove`）
+  时返回 `'invalid-path'`，弹层显示 `worktree.invalidPath`「该目录已不存在，无法新建会话」；
+  其余异常仍是 `unsupported`，并 `console.warn` 出原始 message。

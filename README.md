@@ -34,8 +34,9 @@ do:
   pick, untracked files included (diffed against `/dev/null`);
 - **click the worktree marker** — lists every worktree of the repository with its
   branch and change count. `在此新建会话` opens a new Session in that worktree's
-  directory (a worktree is a directory, so a Session is never moved between
-  them), and `复制路径` copies it. A branch already checked out in another
+  directory — registering the directory as a workspace first when it is not one
+  yet — (a worktree is a directory, so a Session is never moved between them),
+  and `复制路径` copies it. A branch already checked out in another
   worktree is greyed out in the branch popover with the worktree that holds it,
   instead of failing with git's `already checked out` after the click.
 

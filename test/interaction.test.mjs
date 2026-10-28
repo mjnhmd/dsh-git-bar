@@ -148,6 +148,7 @@ const worktreeReply = {
     { path: '/repo', name: 'repo', branch: 'main', detached: false, sha: 'aaa', bare: false, locked: false, prunable: false, main: true, current: false, dirty: { changed: 0 } },
     { path: '/repo-link', name: 'repo-link', branch: 'codex/perf', detached: false, sha: 'bbb', bare: false, locked: false, prunable: false, main: false, current: true, dirty: { changed: 2 } },
     { path: '/repo-hotfix', name: 'repo-hotfix', branch: null, detached: true, sha: 'ccc', bare: false, locked: false, prunable: false, main: false, current: false, dirty: null },
+    { path: '/repo-gone', name: 'repo-gone', branch: 'old', detached: false, sha: 'ddd', bare: false, locked: false, prunable: false, main: false, current: false, dirty: { changed: 1 } },
   ],
 }
 
@@ -275,8 +276,26 @@ await import('../client.js')
 const runtime = createRuntime()
 const plugin = globalThis.__captured.factory(() => runtime.React)
 
+// 工作区注册表：/repo 与 /repo-link 已注册，/repo-hotfix 未注册，/repo-gone 的目录已被删掉。
+// create 与 host 侧行为一致：同一目录幂等返回已有记录；目录不存在时抛 workspace/invalid-path。
+const workspaceItems = [{ workspaceId: 'ws-1', path: '/repo' }, { workspaceId: 'ws-2', path: '/repo-link' }]
 const services = {
-  workspaces: { list: { getSnapshot: () => ({ items: [{ workspaceId: 'ws-1', path: '/repo' }, { workspaceId: 'ws-2', path: '/repo-link' }] }) } },
+  workspaces: {
+    list: { getSnapshot: () => ({ items: workspaceItems }) },
+    create: async ({ path }) => {
+      requests.push(`create:${path}`)
+      if (path === '/repo-gone') {
+        const error = new Error(`cannot create a Workspace at "${path}": path is not a directory`)
+        error.rpcError = { code: 'workspace/invalid-path' }
+        throw error
+      }
+      const known = workspaceItems.find((item) => item.path === path)
+      if (known !== undefined) return known
+      const created = { workspaceId: `ws-${workspaceItems.length + 1}`, path }
+      workspaceItems.push(created)
+      return created
+    },
+  },
   uiWorkspace: { openWorkspace: async (id) => { requests.push(`open:${id}`) } },
   locale: { register: () => () => {}, bind: () => (key, params) => (params === undefined ? key : `${key}(${JSON.stringify(params)})`) },
   sessions: { list: { getSnapshot: () => ({ byId: { s1: { cwd: '/repo-link' } } }) } },
@@ -320,18 +339,37 @@ await flush()
 tree = runtime.rerender(element)
 assert.ok(fetches.some((url) => url.startsWith('/dsh-git-bar/worktrees')), 'worktree list fetched')
 const rows = findAll(tree, (node) => typeof node.props['data-worktree'] === 'string')
-assert.deepEqual(rows.map((row) => row.props['data-worktree']), ['/repo', '/repo-link', '/repo-hotfix'])
+assert.deepEqual(rows.map((row) => row.props['data-worktree']), ['/repo', '/repo-link', '/repo-hotfix', '/repo-gone'])
 console.log('1 worktree popover OK:', rows.length, 'rows')
 
-// 2. 当前工作树没有“在此新建会话”，其余两个有
+// 2. 当前工作树没有“在此新建会话”，其余三个有
 const openers = findAll(tree, (node) => typeof node.props['data-worktree-open'] === 'string')
-assert.deepEqual(openers.map((node) => node.props['data-worktree-open']), ['/repo', '/repo-hotfix'])
+assert.deepEqual(openers.map((node) => node.props['data-worktree-open']), ['/repo', '/repo-hotfix', '/repo-gone'])
 console.log('2 open actions OK:', openers.length)
 
-// 3. 点“在此新建会话”把目录交给宿主：已注册的工作区才会真的开
+// 3. 已注册目录：create 幂等返回同一个工作区，再在那里开新会话
 openers[0].props.onClick()
 await flush()
-assert.deepEqual(requests, ['open:ws-1'])
+assert.deepEqual(requests, ['create:/repo', 'open:ws-1'])
+
+// 3b. 未注册的工作树目录：当场注册成工作区再开（此前这里直接报“该目录还不是工作区”）
+await openers[1].props.onClick()
+await flush()
+assert.deepEqual(requests, ['create:/repo', 'open:ws-1', 'create:/repo-hotfix', 'open:ws-3'])
+
+// 3c. 目录已被删除：create 抛 workspace/invalid-path，弹层留在原地并给提示。
+// 3b 成功会关掉弹层，所以这里重新打开。
+trigger.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ top: 600, right: 700 }) } })
+await flush()
+tree = runtime.rerender(element)
+const goneOpener = findAll(tree, (node) => node.props['data-worktree-open'] === '/repo-gone')[0]
+assert.ok(goneOpener !== undefined, 'vanished worktree still offers the action')
+await goneOpener.props.onClick()
+await flush()
+tree = runtime.rerender(element)
+assert.ok(textOf(tree).some((text) => text.includes('worktree.invalidPath')), 'invalid path reported')
+assert.equal(findAll(tree, (node) => node.props['data-worktree-open'] === '/repo-gone').length, 1, 'popover stays open')
+console.log('3 worktree session OK:', requests.length, 'host calls')
 
 // 4. 复制路径
 const copier = findAll(tree, (node) => node.props['data-worktree-copy'] === '/repo-hotfix')[0]

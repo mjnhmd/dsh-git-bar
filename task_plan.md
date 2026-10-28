@@ -137,3 +137,17 @@ GET /dsh-git-bar/authors?sessionId=<id>[&dir=<abs>]
 - 上限 500 条，超出时 `truncated: true`；
 - `dir` 只在 Session store 查不到时兜底，且必须是绝对路径；非仓库（有 `.git` 但 `git log` 失败）→ `{ authors: [], truncated: false }`；
 - 走和其他路由相同的 `requestRejection` 准入。
+
+## 第四轮：工作树「在此新建会话」报「该目录还不是工作区」（当前任务）
+
+用户（m00003）：「现在我点击工作树的在此新建会话会提示该目录还不是工作区」。
+
+### 目标与验收
+1. 点击工作树行的「在此新建会话」，在该 worktree 目录里开出新会话；目录未注册成工作区时先注册再开，
+   不再直接报「该目录还不是工作区」；
+2. 已注册目录行为不变（`workspaces.create` 幂等，返回同一 `workspaceId`）；
+3. 目录已不存在（`workspace/invalid-path`）时弹层留在原地并给出「该目录已不存在，无法新建会话」，
+   不静默、不假装打开；缺 Client 服务时仍是 `unsupported`；
+4. `node test/interaction.test.mjs` 覆盖三条分支：已注册目录只 `create`+`open` 一次、未注册目录现场注册后打开
+   （requests 依次为 `create:/repo`、`open:ws-1`、`create:/repo-hotfix`、`open:ws-3`）、目录已删时报错且弹层不关；
+5. README 中英同步这句话；`npm run check` + `npm test` 全绿。
