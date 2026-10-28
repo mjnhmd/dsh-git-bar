@@ -87,3 +87,23 @@ GET /dsh-git-bar/commit-diff?sessionId=<id>[&dir=<abs>]&hash=<4..40 hex>&path=<�
 - `limit` 缺省/非数字 → 60，数字越界才钳到 1..300；`/commit` 文件上限 `MAX_COMMIT_FILES=500`。
 - 合并提交的文件列表为空（`git diff-tree` 对 merge 默认不列文件），界面因此显示「这笔提交没有文件变更」
   ——已知限制，不在本次范围。
+
+## 第二轮：历史页的筛选栏（当前任务）
+
+### 目标与验收
+用户只要求按**分支**和**提交人**筛选（m00511：「主要就是根据分支和提交人去筛选」），
+外加已有的关键字框。所以筛选栏是：关键字输入 + 分支下拉 + 用户下拉 + 重置，不做日期 / 路径。
+
+验收标准（可验证）：
+1. `node test/host.test.mjs` 覆盖 `branch` / `author` 的成功路径与非法输入拒绝（坏 ref、超长 author、控制字符），全绿。
+2. `node test/client.test.mjs`、`node test/interaction.test.mjs` 覆盖筛选栏渲染、下拉选项、选中后重新请求（URL 带对应参数），全绿。
+3. 真仓库实测：选分支后列表只剩该分支提交；选提交人后只剩该作者提交；两者叠加取交集。
+
+### `/log` 参数（Host 侧契约）
+```
+GET /dsh-git-bar/log?sessionId=<id>[&dir=<abs>][&limit=1..300][&branch=<ref>][&author=<text>]
+```
+- `branch`：1..200 字符，匹配 `/^[A-Za-z0-9._/-]+$/`、不以 `-` 开头、不含 `..`；给了就把它当 rev
+  （`git log <branch> ...`，替代 `--all`）。ref 不存在时 git 非零退出 → 沿用现有失败形状，`reason: 'unknown-ref'`。
+- `author`：1..200 字符、无控制字符 → `--author=<text>`（git 按正则匹配姓名/邮箱）。
+- 响应原有字段不变，额外回显 `filters: { branch, author }`（未启用为 `null`），供客户端断言与 UI 回显。
