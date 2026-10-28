@@ -10,3 +10,13 @@
 - `npm pack --dry-run --json --cache /tmp/dsh-git-bar-npm-cache` 退出 0；包内共 20 项，包含 README.zh.md、screenshots.json 和三张预览图。
 - `npm test` 退出 0：`ALL HOST TESTS PASSED`、`ALL CLIENT TESTS PASSED`、`ALL INTERACTION TESTS PASSED`。
 - 市场截图规则：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md#screenshots--截图optional-recommended--可选推荐 。推荐插件仓库根目录 screenshots.json，夜间构建采集；不再向目录的旧截图映射提交新条目。
+- 参照实现 `KannaKuron/dsh-ide-git` 的 `src/client/git-graph.ts` 与 `xbzbing/dsh-git-panel` 的
+  `src/client/Panel.tsx`：两者都是「lane 数组 + 每行边（into/out/pass）」的轻量布局，没有用第三方图库；
+  本插件按同样思路自写 `layoutGraph`，不引入依赖。
+- `conversation.view` 座位注册形状（从 `git-panel/src/client/index.ts:66-69` 抄的契约）：
+  `ctx.slots.inject('conversation.view', () => ctx.slots.register({ name, id, order, locale, label: () => t('...') }, Component))`，
+  组件从 props 拿 `sessionId`。
+- 运行中的桌面端不会热加载插件 Host 半边：改动后 `curl http://127.0.0.1:53244/dsh-git-bar/log` 返回 404，
+  而同机已有路由 `/dsh-git-bar/info` 返回 401（认证层），说明是「路由未注册」而不是「未授权」→ 必须重启应用。
+- 该 GUI 需要 `dsh web` 打印的带 token 地址才能认证，`/` 直接访问返回
+  `dsh web authentication required; reopen the URL printed by dsh web.`，所以命令行无法直接截图验证界面。

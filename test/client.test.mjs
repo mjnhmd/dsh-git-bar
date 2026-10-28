@@ -37,7 +37,10 @@ assert.equal(typeof plugin.apply, 'function')
 console.log('2 plugin shape OK')
 
 // --- apply(): slot registration ---
-let injectedSlot, registeredOptions, registeredComponent
+// 插件现在注册两个座位（输入框上方的状态条 + 主对话区的「Git 历史」标签页），
+// 所以按座位名分开存，别再靠「最后一次注册」这种顺序假设。
+const registrations = new Map()
+const injectedSlots = []
 const ctx = {
   get(name) {
     if (name === 'locale') {
@@ -50,15 +53,22 @@ const ctx = {
   },
   effect: (fn) => fn(),
   slots: {
-    inject(slotName, callback) { injectedSlot = slotName; return callback() },
+    inject(slotName, callback) { injectedSlots.push(slotName); return callback() },
     register(options, component) {
-      registeredOptions = options
-      registeredComponent = component
+      registrations.set(options.name, { options, component })
       return () => {}
     },
   },
 }
 plugin.apply(ctx)
+const dockRegistration = registrations.get('conversation.input.dock')
+const viewRegistration = registrations.get('conversation.view')
+assert.deepEqual(injectedSlots, ['conversation.input.dock', 'conversation.view'], 'two seats injected')
+assert.ok(dockRegistration !== undefined, 'dock seat registered')
+assert.ok(viewRegistration !== undefined, 'conversation.view seat registered')
+const injectedSlot = 'conversation.input.dock'
+const registeredOptions = dockRegistration.options
+const registeredComponent = dockRegistration.component
 assert.equal(injectedSlot, 'conversation.input.dock')
 assert.equal(registeredOptions.name, 'conversation.input.dock')
 assert.equal(registeredOptions.id, 'git-bar')
@@ -167,5 +177,63 @@ assert.deepEqual(textOf(wtNode), ['T:worktree.count'])
 stateOverride = { phase: 'ready', body: { dir: '/tmp/main', repository: { ...repository, worktree: { linked: false, mainRoot: '/tmp/main', count: 1 } } } }
 assert.equal(findAll(registeredComponent(props), (node) => node.props?.['data-git-bar-worktrees-trigger'] !== undefined).length, 0)
 console.log('13 worktree trigger OK')
+
+// 14. conversation.view 座位：标签走词典，props 带 sessionId 与 cwd 读取器
+assert.equal(viewRegistration.options.name, 'conversation.view')
+assert.equal(viewRegistration.options.id, 'git-history')
+assert.equal(viewRegistration.options.order, 20)
+assert.equal(viewRegistration.options.locale, 'git-bar')
+assert.equal(viewRegistration.options.label(), 'T:history.tab')
+const viewProps = viewRegistration.options.inject('session-1')
+assert.equal(viewProps.sessionId, 'session-1')
+assert.equal(viewProps.readCwd(), '/tmp/repo')
+assert.equal(viewProps.t('history.title'), 'T:history.title')
+console.log('14 conversation.view seat OK:', viewRegistration.options.id)
+
+// --- 分叉图谱布局（纯函数） ---
+// 15. 直线历史：一条 lane 一条线，尖端上面不该有线
+const linear = plugin.layoutGraph([
+  { hash: 'c3', parents: ['c2'] },
+  { hash: 'c2', parents: ['c1'] },
+  { hash: 'c1', parents: [] },
+])
+assert.deepEqual(linear.map((row) => row.lane), [0, 0, 0])
+assert.deepEqual(linear.map((row) => row.color), [0, 0, 0])
+assert.deepEqual(linear[0].edges.map((edge) => edge.kind), ['out'])
+assert.deepEqual(linear[1].edges.map((edge) => edge.kind), ['into', 'out'])
+assert.deepEqual(linear[2].edges.map((edge) => edge.kind), ['into'])
+assert.equal(plugin.graphLaneCount(linear), 1)
+console.log('15 linear graph OK:', JSON.stringify(linear.map((row) => row.edges.map((edge) => edge.kind))))
+
+// 16. 分叉 + 合并：第二条 lane 有自己的颜色，合并提交把线收回第一条
+const merge = plugin.layoutGraph([
+  { hash: 'm', parents: ['a', 'b'] },
+  { hash: 'a', parents: ['base'] },
+  { hash: 'b', parents: ['base'] },
+  { hash: 'base', parents: [] },
+])
+assert.equal(merge[0].merge, true, 'merge commit flagged')
+assert.deepEqual(merge[0].edges.map((edge) => edge.to), [0, 1])
+assert.deepEqual(merge[0].edges.map((edge) => edge.color), [0, 1])
+assert.deepEqual(merge[1].edges.map((edge) => edge.kind), ['into', 'pass', 'out'])
+assert.deepEqual(merge[2].edges.map((edge) => edge.kind), ['pass', 'into', 'out'])
+assert.equal(merge[2].edges[1].from, 1, 'second branch lands on its own lane')
+assert.equal(merge[2].edges[2].from, 1)
+assert.equal(merge[2].edges[2].to, 0, 'merged line folds back into lane 0')
+assert.deepEqual(merge[3].edges.map((edge) => edge.kind), ['into'])
+assert.equal(plugin.graphLaneCount(merge), 2)
+assert.equal(merge[1].edges[1].color, 1, 'pass-through keeps the branch colour')
+console.log('16 merge graph OK: lanes', plugin.graphLaneCount(merge))
+
+// 17. 历史视图首屏：没有数据时渲染等待文案，不抛异常
+stateOverride = undefined
+const historyProps = viewRegistration.options.inject('session-1')
+const historyTree = viewRegistration.component(historyProps)
+assert.ok(historyTree !== undefined, 'history view rendered')
+assert.equal(historyTree.props['data-dsh-git-bar-history'], '')
+const historyText = textOf(historyTree).join(' ')
+assert.ok(historyText.includes('T:history.title'), historyText)
+assert.ok(historyText.includes('T:history.loading'), historyText)
+console.log('17 history view first paint OK:', historyText)
 
 console.log('\nALL CLIENT TESTS PASSED')

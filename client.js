@@ -40,6 +40,22 @@ window.__ModuleLoader__.load({
     const CHANGES_ROUTE = '/dsh-git-bar/changes'
     /** Host route rendering one file's unified diff. */
     const DIFF_ROUTE = '/dsh-git-bar/diff'
+    /** Host route listing the commit history of the repository. */
+    const LOG_ROUTE = '/dsh-git-bar/log'
+    /** Host route describing one commit and the files it changed. */
+    const COMMIT_ROUTE = '/dsh-git-bar/commit'
+    /** Host route rendering one file's change inside one commit. */
+    const COMMIT_DIFF_ROUTE = '/dsh-git-bar/commit-diff'
+    /** Conversation-view tab id owned by this plugin. */
+    const HISTORY_VIEW_ID = 'git-bar-history'
+    /** Commits asked for by one page, and added by every "load more". */
+    const HISTORY_PAGE = 60
+    /** Width of one graph lane. */
+    const LANE_W = 12
+    /** Height of one history row; the graph cell is drawn to the same grid. */
+    const GRAPH_ROW_H = 26
+    /** Lane palette; a lane keeps one colour for its whole run. */
+    const LANE_COLORS = ['#4f8cff', '#e879a6', '#f0a04b', '#3fb27f', '#9d7bff', '#e05d5d', '#3aa8c1', '#b5b62b']
     /** Right-Sidebar tab kind owned by this plugin. */
     const CHANGES_KIND = 'gitBarChanges'
     /** Right-Sidebar tab type owned by this plugin. */
@@ -95,6 +111,26 @@ window.__ModuleLoader__.load({
       'worktree.dirty': '{count} 处改动',
       'worktree.count': '{count} 个工作树',
       'menu.occupied': '已在 {name} 中使用',
+      'history.title': 'Git',
+      'history.tab': 'Git 历史',
+      'history.count': '{count} 笔提交',
+      'history.filter': '搜索提交信息或哈希',
+      'history.refresh': '刷新',
+      'history.loading': '正在读取提交历史…',
+      'history.failed': '读取提交历史失败',
+      'history.empty': '这个仓库还没有提交',
+      'history.notRepository': '这个目录不在 Git 仓库里',
+      'history.nomatch': '没有匹配的提交',
+      'history.more': '加载更多提交',
+      'history.pick': '选一笔提交查看详情',
+      'history.files': '变更文件',
+      'history.noFiles': '这笔提交没有文件变更',
+      'history.diffPick': '选一个文件看它在这笔提交里的改动',
+      'history.binary': '二进制',
+      'history.merge': '合并',
+      'history.truncated': '内容过大，仅显示前一部分',
+      'history.today': '今天',
+      'history.yesterday': '昨天',
     }
 
     /** English dictionary, checked complete against the zh key set. */
@@ -145,6 +181,26 @@ window.__ModuleLoader__.load({
       'worktree.dirty': '{count} changed',
       'worktree.count': '{count} worktrees',
       'menu.occupied': 'checked out in {name}',
+      'history.title': 'Git',
+      'history.tab': 'Git history',
+      'history.count': '{count} commits',
+      'history.filter': 'Filter by message or hash',
+      'history.refresh': 'Refresh',
+      'history.loading': 'Reading history…',
+      'history.failed': 'Could not read history',
+      'history.empty': 'This repository has no commits yet',
+      'history.notRepository': 'This directory is not inside a Git repository',
+      'history.nomatch': 'No commit matches',
+      'history.more': 'Load more commits',
+      'history.pick': 'Pick a commit to see its detail',
+      'history.files': 'Changed files',
+      'history.noFiles': 'This commit changes no file',
+      'history.diffPick': 'Pick a file to see its change in this commit',
+      'history.binary': 'binary',
+      'history.merge': 'merge',
+      'history.truncated': 'Content too large; showing the first part',
+      'history.today': 'Today',
+      'history.yesterday': 'Yesterday',
     }
 
     const styles = {
@@ -1641,6 +1697,752 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /* ============================== history view ============================== */
+
+    /** 历史视图独占的样式；状态条那套 `styles` 仍归状态条使用。 */
+    const historyStyles = {
+      // 顶层：主对话区标签页里的一整块，自己管滚动，不把外层撑高。
+      view: {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: 0,
+        maxHeight: 'calc(100vh - 210px)',
+        border: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        borderRadius: '10px',
+        overflow: 'hidden',
+      },
+      head: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '6px 10px',
+        flex: 'none',
+        borderBottom: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+      },
+      title: { fontWeight: 600, flex: 'none' },
+      count: {
+        flex: 'none',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+      },
+      filter: {
+        flex: '1 1 auto',
+        minWidth: 0,
+        padding: '3px 8px',
+        font: 'inherit',
+        fontSize: '12px',
+        color: 'inherit',
+        background: 'var(--dsw-alias-bg-secondary, #f3f4f6)',
+        border: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        borderRadius: '6px',
+      },
+      body: { display: 'flex', flex: '1 1 auto', minHeight: 0 },
+      list: {
+        flex: '1 1 52%',
+        minWidth: 0,
+        overflow: 'auto',
+        padding: '4px 0',
+      },
+      row: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        width: '100%',
+        padding: '0 8px 0 4px',
+        height: `${GRAPH_ROW_H}px`,
+        border: 'none',
+        background: 'none',
+        font: 'inherit',
+        fontSize: '12.5px',
+        textAlign: 'left',
+        color: 'inherit',
+        cursor: 'pointer',
+      },
+      rowActive: { background: 'var(--dsw-alias-bg-secondary, #eef2f7)' },
+      subject: {
+        flex: '1 1 auto',
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      refs: { display: 'flex', gap: '4px', flex: 'none', maxWidth: '45%', overflow: 'hidden' },
+      ref: {
+        flex: 'none',
+        fontSize: '10px',
+        lineHeight: '15px',
+        padding: '0 5px',
+        borderRadius: '999px',
+        border: '1px solid currentColor',
+        maxWidth: '150px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      meta: {
+        flex: 'none',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+        maxWidth: '110px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      when: {
+        flex: 'none',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+        width: '86px',
+        textAlign: 'right',
+      },
+      detail: {
+        flex: '1 1 48%',
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        borderLeft: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        overflow: 'hidden',
+      },
+      detailHead: {
+        flex: 'none',
+        padding: '8px 10px 0',
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '6px',
+      },
+      detailSubject: { fontWeight: 600, flex: '1 1 auto', minWidth: 0, wordBreak: 'break-word' },
+      detailHash: {
+        flex: 'none',
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+      },
+      detailMeta: {
+        flex: 'none',
+        padding: '2px 10px 6px',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+      },
+      detailBody: {
+        flex: 'none',
+        maxHeight: '132px',
+        overflow: 'auto',
+        margin: 0,
+        padding: '0 10px 8px',
+        font: 'inherit',
+        fontSize: '12px',
+        lineHeight: '18px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      },
+      section: {
+        flex: 'none',
+        padding: '4px 10px',
+        fontSize: '11px',
+        fontWeight: 600,
+        color: 'var(--dsw-alias-label-secondary, #6b7280)',
+        borderTop: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+      },
+      files: { flex: '0 1 auto', minHeight: 0, overflow: 'auto', padding: '0 4px 4px' },
+      file: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        width: '100%',
+        padding: '3px 6px',
+        border: 'none',
+        background: 'none',
+        font: 'inherit',
+        fontSize: '12px',
+        textAlign: 'left',
+        color: 'inherit',
+        cursor: 'pointer',
+      },
+      fileActive: { background: 'var(--dsw-alias-bg-secondary, #eef2f7)', borderRadius: '6px' },
+      fileStatus: {
+        flex: 'none',
+        width: '12px',
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+      },
+      filePath: {
+        flex: '1 1 auto',
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        direction: 'rtl',
+        textAlign: 'left',
+      },
+      fileStat: {
+        flex: 'none',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+      },
+      diff: {
+        flex: '1 1 auto',
+        minHeight: '120px',
+        overflow: 'auto',
+        margin: 0,
+        padding: '8px 10px',
+        borderTop: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        fontSize: '11.5px',
+        lineHeight: '17px',
+        whiteSpace: 'pre',
+      },
+      hint: {
+        padding: '10px',
+        fontSize: '12px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+      },
+    }
+
+    /**
+     * 给一批「新到旧」的提交分配 lane 与行内连线。
+     *
+     * `lanes[i]` 记这条 lane 此刻正在等哪一笔提交（它的子提交已经画过了）。
+     * 从上往下走：提交落在第一个等它的 lane 上，没有就开一条新 lane；
+     * 第一个父提交续在当前 lane，其余父提交各开一条（或复用已在等它的那条）lane。
+     * 每条 lane 一个颜色，整条线同色，lane 关掉时颜色回收给后面的线复用。
+     *
+     * 行内边（edge）三种：`into` 从行顶收到节点，`out` 从节点落到行底，
+     * `pass` 整行贯穿——这样节点附近不会被整高的直线盖住。
+     *
+     * @param commits - 提交数组，必须新到旧、且每项带 `hash` 与 `parents`。
+     * @returns 每行 `{ commit, lane, color, edges, merge }`。
+     */
+    function layoutGraph(commits) {
+      const rows = []
+      let lanes = []
+      let laneColor = []
+      const freed = []
+      let nextColor = 0
+
+      /** 取一个回收得最小的颜色，让调色板保持紧凑。 */
+      const openColor = () => {
+        if (freed.length === 0) return nextColor++
+        const color = Math.min(...freed)
+        freed.splice(freed.indexOf(color), 1)
+        return color
+      }
+
+      const freeColor = (color) => {
+        if (typeof color === 'number' && !freed.includes(color)) freed.push(color)
+      }
+
+      /** 给一笔还没人等的提交开一条 lane。 */
+      const openLane = (hash) => {
+        let lane = lanes.indexOf(null)
+        if (lane === -1) {
+          lane = lanes.length
+          lanes.push(null)
+          laneColor.push(null)
+        }
+        lanes[lane] = hash
+        laneColor[lane] = openColor()
+        return lane
+      }
+
+      for (const commit of commits) {
+        const hash = typeof commit?.hash === 'string' ? commit.hash : ''
+        if (hash === '') continue
+        const parents = Array.isArray(commit.parents) ? commit.parents.filter((item) => typeof item === 'string' && item !== '') : []
+        const awaited = lanes.indexOf(hash)
+        const awaitedBefore = awaited !== -1
+        const lane = awaited === -1 ? openLane(hash) : awaited
+        const before = lanes.slice()
+        const beforeColor = laneColor.slice()
+        const color = laneColor[lane]
+
+        // 两条 lane 同时在等这笔提交（分叉后又汇合）：多出来的并进当前这条。
+        for (let index = 0; index < lanes.length; index += 1) {
+          if (index !== lane && lanes[index] === hash) {
+            freeColor(laneColor[index])
+            lanes[index] = null
+            laneColor[index] = null
+          }
+        }
+
+        let continuation = -1
+        const extra = []
+        if (parents.length === 0) {
+          // 根提交：这条线到此为止。
+          freeColor(laneColor[lane])
+          lanes[lane] = null
+          laneColor[lane] = null
+        } else {
+          const first = parents[0]
+          // 第一个父提交如果已经有一条 lane 在等，两条线在祖先处合并：留靠左的那条。
+          const other = lanes.findIndex((item, index) => item === first && index !== lane)
+          if (other === -1) {
+            lanes[lane] = first
+            continuation = lane
+          } else {
+            const keep = Math.min(lane, other)
+            const drop = Math.max(lane, other)
+            lanes[keep] = first
+            freeColor(laneColor[drop])
+            lanes[drop] = null
+            laneColor[drop] = null
+            continuation = keep
+          }
+          // 合并提交的其余父提交：复用已在等它的 lane，否则开新的。
+          for (let index = 1; index < parents.length; index += 1) {
+            const existing = lanes.findIndex((item) => item === parents[index])
+            extra.push(existing === -1 ? openLane(parents[index]) : existing)
+          }
+        }
+
+        const edges = []
+        for (let index = 0; index < before.length; index += 1) {
+          const waiting = before[index]
+          if (waiting === null) continue
+          if (waiting === hash) {
+            // 新开的 lane 上面没有线：最新提交、分支尖端不该往下拖一截。
+            if (index === lane && !awaitedBefore) continue
+            edges.push({ from: index, to: lane, color: beforeColor[index], kind: 'into' })
+          } else {
+            const to = lanes[index] === waiting ? index : lanes.indexOf(waiting)
+            if (to !== -1) edges.push({ from: index, to, color: beforeColor[index], kind: 'pass' })
+          }
+        }
+        if (continuation !== -1) {
+          edges.push({ from: lane, to: continuation, color: laneColor[continuation], kind: 'out' })
+        }
+        for (const target of extra) {
+          edges.push({ from: lane, to: target, color: laneColor[target], kind: 'out' })
+        }
+
+        rows.push({ commit, lane, color, edges, merge: parents.length >= 2 })
+
+        // 尾部空 lane 剪掉，图列宽度才是真实占用的列数。
+        while (lanes.length > 0 && lanes[lanes.length - 1] === null) {
+          lanes.pop()
+          laneColor.pop()
+        }
+      }
+
+      return rows
+    }
+
+    /**
+     * 这批行一共占几条 lane。
+     * @param rows - `layoutGraph` 的结果。
+     * @returns 至少 1 的 lane 数。
+     */
+    function graphLaneCount(rows) {
+      let count = 1
+      for (const row of rows) {
+        count = Math.max(count, row.lane + 1)
+        for (const edge of row.edges) count = Math.max(count, edge.from + 1, edge.to + 1)
+      }
+      return count
+    }
+
+    /**
+     * 一行提交的图列：贯穿的直线、进出节点的曲线，最后是节点本身。
+     * @param props - `{ row, lanes }`，`lanes` 是整批的 lane 数，保证每行同宽。
+     */
+    function GraphCell(props) {
+      const row = props.row
+      const lanes = Math.max(1, Number(props.lanes) || 1)
+      const width = lanes * LANE_W
+      const middle = GRAPH_ROW_H / 2
+      const xOf = (lane) => lane * LANE_W + LANE_W / 2
+      const children = []
+
+      row.edges.forEach((edge, index) => {
+        const x1 = xOf(edge.from)
+        const x2 = xOf(edge.to)
+        const y1 = edge.kind === 'out' ? middle : 0
+        const y2 = edge.kind === 'into' ? middle : GRAPH_ROW_H
+        const d =
+          x1 === x2
+            ? `M${x1} ${y1}L${x2} ${y2}`
+            : `M${x1} ${y1}C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2} ${x2} ${y2}`
+        children.push(
+          h('path', {
+            key: `edge-${index}`,
+            d,
+            fill: 'none',
+            stroke: LANE_COLORS[Math.abs(edge.color ?? 0) % LANE_COLORS.length],
+            strokeWidth: 1.6,
+            strokeLinecap: 'round',
+          }),
+        )
+      })
+
+      children.push(
+        h('circle', {
+          key: 'node',
+          cx: xOf(row.lane),
+          cy: middle,
+          r: row.merge ? 4 : 3.4,
+          fill: LANE_COLORS[Math.abs(row.color ?? 0) % LANE_COLORS.length],
+          stroke: row.merge ? 'none' : 'var(--dsw-alias-bg-primary, #fff)',
+          strokeWidth: row.merge ? 0 : 1.2,
+        }),
+      )
+
+      return h(
+        'svg',
+        {
+          width,
+          height: GRAPH_ROW_H,
+          viewBox: `0 0 ${width} ${GRAPH_ROW_H}`,
+          style: { flex: 'none', display: 'block' },
+          'aria-hidden': 'true',
+          'data-history-graph': '',
+        },
+        children,
+      )
+    }
+
+    /**
+     * ref 徽章的配色：本地分支、远端分支、tag、HEAD 各一档。
+     * @param kind - Host 给的 `kind`。
+     * @returns 一个颜色。
+     */
+    function refBadgeColor(kind) {
+      if (kind === 'tag') return 'var(--dsw-alias-state-warning-label, #b45309)'
+      if (kind === 'remote') return 'var(--dsw-alias-state-info-label, #1d4ed8)'
+      if (kind === 'head') return 'var(--dsw-alias-state-success-label, #15803d)'
+      return 'var(--dsw-alias-label-secondary, #6b7280)'
+    }
+
+    /**
+     * 把 ISO 时间写成「今天 19:15 / 昨天 19:15 / 10/27 19:15」。
+     * @param when - Host 返回的 ISO 8601 字符串。
+     * @param t - 词典函数。
+     * @returns 可显示的文字；解析不出来时给空串。
+     */
+    function formatWhen(when, t) {
+      const value = Date.parse(String(when ?? ''))
+      if (!Number.isFinite(value)) return ''
+      const then = new Date(value)
+      const now = new Date()
+      const pad = (input) => String(input).padStart(2, '0')
+      const clock = `${pad(then.getHours())}:${pad(then.getMinutes())}`
+      const sameDay = (left, right) => left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate()
+      if (sameDay(then, now)) return `${t('history.today')} ${clock}`
+      const yesterday = new Date(now.getTime() - 86_400_000)
+      if (sameDay(then, yesterday)) return `${t('history.yesterday')} ${clock}`
+      const date = then.getFullYear() === now.getFullYear() ? `${pad(then.getMonth() + 1)}/${pad(then.getDate())}` : `${then.getFullYear()}/${pad(then.getMonth() + 1)}/${pad(then.getDate())}`
+      return `${date} ${clock}`
+    }
+
+    /**
+     * 「Git」主对话区标签页：左边分叉图谱 + 提交列表，右边提交详情与逐文件 diff。
+     * @param props - 槽位 props；`sessionId` 由会话视图注入，`t` 与 `readCwd` 由注册处传入。
+     */
+    function HistoryView(props) {
+      const t = typeof props.t === 'function' ? props.t : fallbackT
+      const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
+      const readCwd = typeof props.readCwd === 'function' ? props.readCwd : () => undefined
+      const dir = readCwd() ?? ''
+
+      const [page, setPage] = React.useState({ limit: HISTORY_PAGE, nonce: 0 })
+      const [log, setLog] = React.useState({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
+      const [filter, setFilter] = React.useState('')
+      const [picked, setPicked] = React.useState('')
+      const [detail, setDetail] = React.useState({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
+      const [pickedPath, setPickedPath] = React.useState('')
+      const [diff, setDiff] = React.useState({ phase: 'idle', text: '', truncated: false })
+
+      const queryFor = (extra) => {
+        const params = new URLSearchParams({ sessionId })
+        if (dir !== '') params.set('dir', dir)
+        for (const key of Object.keys(extra ?? {})) {
+          const value = extra[key]
+          if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
+        }
+        return params.toString()
+      }
+
+      const getJson = async (route, extra) => {
+        const response = await fetch(`${route}?${queryFor(extra)}`, {
+          headers: { accept: 'application/json' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(body.message ?? body.error ?? `HTTP ${response.status}`)
+        return body
+      }
+
+      React.useEffect(() => {
+        let live = true
+        setLog({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
+        getJson(LOG_ROUTE, { limit: page.limit })
+          .then((body) => {
+            if (!live) return
+            setLog({
+              phase: 'ready',
+              commits: Array.isArray(body.commits) ? body.commits : [],
+              hasMore: body.hasMore === true,
+              reason: typeof body.reason === 'string' ? body.reason : '',
+              error: '',
+            })
+          })
+          .catch((error) => {
+            if (!live) return
+            setLog({ phase: 'failed', commits: [], hasMore: false, reason: '', error: error instanceof Error ? error.message : String(error) })
+          })
+        return () => {
+          live = false
+        }
+      }, [sessionId, dir, page.limit, page.nonce])
+
+      React.useEffect(() => {
+        if (picked === '') {
+          setDetail({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
+          return () => {}
+        }
+        let live = true
+        setDetail({ phase: 'loading', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
+        getJson(COMMIT_ROUTE, { hash: picked })
+          .then((body) => {
+            if (!live) return
+            setDetail({
+              phase: 'ready',
+              subject: String(body.subject ?? ''),
+              body: String(body.body ?? ''),
+              short: String(body.short ?? ''),
+              author: String(body.author ?? ''),
+              when: String(body.when ?? ''),
+              files: Array.isArray(body.files) ? body.files : [],
+              error: '',
+              truncated: body.truncated === true,
+            })
+          })
+          .catch((error) => {
+            if (!live) return
+            setDetail({ phase: 'failed', subject: '', body: '', short: '', author: '', when: '', files: [], error: error instanceof Error ? error.message : String(error), truncated: false })
+          })
+        return () => {
+          live = false
+        }
+      }, [picked, sessionId, dir])
+
+      React.useEffect(() => {
+        if (picked === '' || pickedPath === '') {
+          setDiff({ phase: 'idle', text: '', truncated: false })
+          return () => {}
+        }
+        let live = true
+        setDiff({ phase: 'loading', text: '', truncated: false })
+        getJson(COMMIT_DIFF_ROUTE, { hash: picked, path: pickedPath })
+          .then((body) => {
+            if (!live) return
+            setDiff({ phase: 'ready', text: String(body.diff ?? ''), truncated: body.truncated === true })
+          })
+          .catch((error) => {
+            if (!live) return
+            setDiff({ phase: 'failed', text: error instanceof Error ? error.message : String(error), truncated: false })
+          })
+        return () => {
+          live = false
+        }
+      }, [picked, pickedPath, sessionId, dir])
+
+      const rows = layoutGraph(log.commits)
+      const lanes = graphLaneCount(rows)
+      const needle = filter.trim().toLowerCase()
+      const visible =
+        needle === ''
+          ? rows
+          : rows.filter((row) => {
+              const commit = row.commit
+              return [commit.hash, commit.short, commit.subject, commit.author]
+                .map((value) => String(value ?? '').toLowerCase())
+                .some((value) => value.includes(needle))
+            })
+
+      const head = h(
+        'div',
+        { style: historyStyles.head },
+        h('span', { style: historyStyles.title }, t('history.title')),
+        h(
+          'span',
+          { style: historyStyles.count },
+          log.phase === 'ready' && log.reason !== 'not-a-repository'
+            ? t('history.count').replace('{count}', String(log.commits.length))
+            : '',
+        ),
+        h('input', {
+          type: 'search',
+          value: filter,
+          placeholder: t('history.filter'),
+          'aria-label': t('history.filter'),
+          style: historyStyles.filter,
+          'data-history-filter': '',
+          onChange: (event) => setFilter(event.target.value),
+        }),
+        h(
+          'button',
+          {
+            type: 'button',
+            style: styles.paneAction,
+            title: t('history.refresh'),
+            onClick: () => setPage({ limit: HISTORY_PAGE, nonce: page.nonce + 1 }),
+          },
+          t('history.refresh'),
+        ),
+      )
+
+      const list =
+        log.phase === 'loading'
+          ? h('div', { style: historyStyles.hint }, t('history.loading'))
+          : log.phase === 'failed'
+            ? h('div', { style: historyStyles.hint }, `${t('history.failed')} · ${log.error}`)
+            : log.commits.length === 0
+              ? h(
+                  'div',
+                  { style: historyStyles.hint },
+                  log.reason === 'not-a-repository' ? t('history.notRepository') : t('history.empty'),
+                )
+              : visible.length === 0
+                ? h('div', { style: historyStyles.hint }, t('history.nomatch'))
+                : h(
+                    'div',
+                    null,
+                    visible.map((row) => {
+                      const commit = row.commit
+                      const refs = Array.isArray(commit.refs) ? commit.refs : []
+                      return h(
+                        'button',
+                        {
+                          key: commit.hash,
+                          type: 'button',
+                          'data-history-commit': commit.hash,
+                          style: picked === commit.hash ? { ...historyStyles.row, ...historyStyles.rowActive } : historyStyles.row,
+                          title: `${commit.hash}\n${commit.subject ?? ''}`,
+                          onClick: () => {
+                            setPicked(commit.hash)
+                            setPickedPath('')
+                          },
+                        },
+                        h(GraphCell, { row, lanes }),
+                        h('span', { style: historyStyles.subject }, String(commit.subject ?? commit.short ?? '')),
+                        refs.length === 0
+                          ? null
+                          : h(
+                              'span',
+                              { style: historyStyles.refs },
+                              refs.map((ref, index) =>
+                                h(
+                                  'span',
+                                  {
+                                    key: `${ref?.name ?? ''}:${index}`,
+                                    style: { ...historyStyles.ref, color: refBadgeColor(ref?.kind) },
+                                    title: String(ref?.name ?? ''),
+                                  },
+                                  String(ref?.name ?? ''),
+                                ),
+                              ),
+                            ),
+                        h('span', { style: historyStyles.meta }, String(commit.author ?? '')),
+                        h('span', { style: historyStyles.when }, formatWhen(commit.when, t)),
+                      )
+                    }),
+                    log.hasMore
+                      ? h(
+                          'button',
+                          {
+                            type: 'button',
+                            style: { ...styles.paneAction, marginLeft: 0, padding: '6px 10px' },
+                            onClick: () => setPage({ limit: page.limit + HISTORY_PAGE, nonce: page.nonce }),
+                          },
+                          t('history.more'),
+                        )
+                      : null,
+                  )
+
+      const files =
+        detail.files.length === 0
+          ? h('div', { style: historyStyles.hint }, t('history.noFiles'))
+          : h(
+              'div',
+              { style: historyStyles.files },
+              detail.files.map((file) =>
+                h(
+                  'button',
+                  {
+                    key: String(file?.path ?? ''),
+                    type: 'button',
+                    'data-history-file': String(file?.path ?? ''),
+                    style: pickedPath === file?.path ? { ...historyStyles.file, ...historyStyles.fileActive } : historyStyles.file,
+                    title: String(file?.path ?? ''),
+                    onClick: () => setPickedPath(String(file?.path ?? '')),
+                  },
+                  h('span', { style: historyStyles.fileStatus }, String(file?.status ?? '')),
+                  h('span', { style: historyStyles.filePath }, String(file?.path ?? '')),
+                  h(
+                    'span',
+                    { style: historyStyles.fileStat },
+                    file?.binary === true ? t('history.binary') : `+${file?.additions ?? 0} −${file?.deletions ?? 0}`,
+                  ),
+                ),
+              ),
+            )
+
+      const diffPane =
+        pickedPath === ''
+          ? h('div', { style: historyStyles.hint }, t('history.diffPick'))
+          : diff.phase === 'loading'
+            ? h('div', { style: historyStyles.hint }, t('history.loading'))
+            : diff.phase === 'failed'
+              ? h('div', { style: historyStyles.hint }, `${t('history.failed')} · ${diff.text}`)
+              : diff.text === ''
+                ? h('div', { style: historyStyles.hint }, t('history.noFiles'))
+                : h(
+                    'pre',
+                    { style: historyStyles.diff, 'data-history-diff': '' },
+                    diff.text.split('\n').map((line, index) =>
+                      h('div', { key: index, style: diffLineStyle(line) }, line === '' ? ' ' : line),
+                    ),
+                  )
+
+      const detailPane =
+        picked === ''
+          ? h('div', { style: historyStyles.hint }, t('history.pick'))
+          : detail.phase === 'loading'
+            ? h('div', { style: historyStyles.hint }, t('history.loading'))
+            : detail.phase === 'failed'
+              ? h('div', { style: historyStyles.hint }, `${t('history.failed')} · ${detail.error}`)
+              : h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto' } },
+                  h(
+                    'div',
+                    { style: historyStyles.detailHead },
+                    h('span', { style: historyStyles.detailSubject, 'data-history-subject': '' }, detail.subject),
+                    h('span', { style: historyStyles.detailHash }, detail.short),
+                  ),
+                  h('div', { style: historyStyles.detailMeta }, `${detail.author} · ${formatWhen(detail.when, t)}`),
+                  detail.body === '' ? null : h('pre', { style: historyStyles.detailBody, 'data-history-body': '' }, detail.body),
+                  h('div', { style: historyStyles.section }, t('history.files')),
+                  files,
+                  detail.truncated ? h('div', { style: historyStyles.hint }, t('history.truncated')) : null,
+                  diffPane,
+                )
+
+      return h(
+        'div',
+        { style: historyStyles.view, 'data-dsh-git-bar-history': '' },
+        head,
+        h(
+          'div',
+          { style: historyStyles.body },
+          h('div', { style: historyStyles.list, 'data-history-list': '' }, list),
+          h('div', { style: historyStyles.detail, 'data-history-detail': '' }, detailPane),
+        ),
+      )
+    }
+
     /** Read one optional Client service without failing the plugin when it is absent. */
     function service(ctx, name) {
       try {
@@ -1818,11 +2620,38 @@ window.__ModuleLoader__.load({
         )
 
       ctx.slots.inject('conversation.input.dock', register)
+
+      /**
+       * 主对话区的「Git 历史」标签页。和状态条共用同一份 cwd 读取逻辑，
+       * 但它注册在 `conversation.view`：槽位自己给 `sessionId`，标签名走词典。
+       */
+      const registerView = () =>
+        ctx.slots.register(
+          {
+            name: 'conversation.view',
+            id: 'git-history',
+            order: 20,
+            locale: NS,
+            label: () => t('history.tab'),
+            inject: (sessionId) => ({
+              sessionId,
+              readCwd: () => readCwdFor(sessionId),
+              t,
+            }),
+          },
+          HistoryView,
+        )
+
+      ctx.slots.inject('conversation.view', registerView)
     }
 
     return {
       inject: ['slots'],
       apply,
+      /* 测试钩子：分叉图谱的布局是纯函数，单独导出来直接在 Node 里断言，
+         不必把整棵组件树渲染一遍。 */
+      layoutGraph,
+      graphLaneCount,
     }
   },
 })

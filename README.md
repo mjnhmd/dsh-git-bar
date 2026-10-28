@@ -38,6 +38,13 @@ do:
   them), and `复制路径` copies it. A branch already checked out in another
   worktree is greyed out in the branch popover with the worktree that holds it,
   instead of failing with git's `already checked out` after the click.
+
+The conversation also gains a **Git history** view tab. The left half is the
+commit graph — one lane per line of history, each lane keeping its own colour,
+merge commits drawing the line back into the lane it merged into — followed by
+the commit list and a keyword filter. Pick a commit to read its author, time,
+full message and changed files; pick a file to read its unified diff inside that
+commit. The tab only reads: no ref, index or worktree is written.
 - nothing here silently scrolls away: a drag that selects text does not also open
   a popover.
 
@@ -135,6 +142,20 @@ additions, deletions }], dirty, truncated }`, capped at 500 files.
 `GET /dsh-git-bar/diff?sessionId=<id>&path=<repo-relative>&staged=0|1` — `{ path,
 staged, diff, truncated }`, capped at 200 000 characters.
 
+`GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300]` — `{ dir, commits, hasMore,
+truncated }`, where each commit is `{ hash, short, parents, author, email, when,
+subject, refs: [{ name, kind }] }`. `kind` is `head`, `local`, `remote` or `tag`,
+and `name` is the short ref name (the same form `/branches` reports). 60 commits
+by default, 300 at most.
+
+`GET /dsh-git-bar/commit?sessionId=<id>&hash=<4..40 hex>` — `{ dir, hash, short,
+parents, author, email, when, subject, body, files, truncated }`, each file being
+`{ path, status, additions, deletions, binary }`, capped at 500 files.
+
+`GET /dsh-git-bar/commit-diff?sessionId=<id>&hash=<4..40 hex>&path=<repo-relative>`
+— `{ dir, hash, path, diff, truncated }`: one file's unified diff inside that
+commit, also capped at 200 000 characters.
+
 Every git call uses an argument array (no shell), a 4 s timeout, and a 256 KiB
 buffer cap. Nothing is watched and nothing is cached.
 
@@ -142,8 +163,8 @@ buffer cap. Nothing is watched and nothing is cached.
 
 | File | Role |
 |---|---|
-| `index.js` | Host half: the read-only JSON route over the `git` executable |
-| `client.js` | Client half: the `conversation.input.dock` row, the branch popover, and the Sidebar tab body |
+| `index.js` | Host half: the read-only JSON routes over the `git` executable, including the three history routes |
+| `client.js` | Client half: the `conversation.input.dock` row, the branch popover, the Sidebar tab body, and the `conversation.view` Git history tab |
 | `cordis.patch.yml` | Bundle patch that inserts the `git-bar` row |
 | `locale/*.json` | Display metadata for Plugin Manager / Settings |
 | `icon.svg` | Plugin icon |

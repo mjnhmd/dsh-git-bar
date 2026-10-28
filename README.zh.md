@@ -22,6 +22,7 @@ DeepSeek Harness 的 Git 状态条插件：在会话输入框上方、工作区�
 - **逐文件 diff**：点击改动数，在右侧「工作区改动」面板中选择文件、查看统一 diff，支持未跟踪文件。
 - **多工作树**：显示「链接工作树」或工作树数量；点击列出各工作树的分支与改动数，可复制路径，或在指定工作树目录新建会话。不会移动现有会话。
 - **分支占用提示**：已在其他工作树检出的分支会置灰，并提示占用目录。
+- **Git 历史**：主对话区多一个「Git 历史」标签页。左侧是最左侧分叉图谱（一条 lane 一种颜色，合并提交画出折返线）+ 提交列表 + 关键字过滤；点一笔提交看作者、时间、完整提交信息和变更文件，再点文件看它在这笔提交里的统一 diff。全部只读，不写任何引用。
 - **文字可复制**：拖选状态条文字不会误触弹窗。
 
 状态条每 8 秒刷新，也会在窗口重新获得焦点或切换会话时刷新。读取状态不会修改仓库；只有你明确点击切换或新建分支时才执行相应 Git 写操作。Git 拒绝切换（例如存在冲突的本地修改）时会返回错误，不自动丢弃修改。
@@ -89,6 +90,9 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-git-bar
 | `POST /dsh-git-bar/branches/create` | 请求 `{ sessionId, name, from? }`，通过 `git check-ref-format --branch` 校验名称，成功返回 `{ branch, created: true }` |
 | `GET /dsh-git-bar/changes?sessionId=<id>` | 返回 `{ files, dirty, truncated }`，文件含路径、状态、暂存标记和增删行数，最多 500 个文件 |
 | `GET /dsh-git-bar/diff?sessionId=<id>&path=<repo-relative>&staged=0\|1` | 返回 `{ path, staged, diff, truncated }`，diff 最多 200,000 个字符 |
+| `GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300]` | 返回 `{ dir, commits, hasMore, truncated }`；提交含 `hash`、`short`、`parents`、`author`、`email`、`when`、`subject`、`refs: [{ name, kind }]`（`kind` 为 `head` / `local` / `remote` / `tag`，`name` 是短名）。默认 60 笔，最多 300 |
+| `GET /dsh-git-bar/commit?sessionId=<id>&hash=<4..40 hex>` | 返回 `{ dir, hash, short, parents, author, email, when, subject, body, files, truncated }`；文件含 `path`、`status`、`additions`、`deletions`、`binary`，最多 500 个 |
+| `GET /dsh-git-bar/commit-diff?sessionId=<id>&hash=<4..40 hex>&path=<repo-relative>` | 返回 `{ dir, hash, path, diff, truncated }`，即这笔提交里该文件的统一 diff，同样最多 200,000 个字符 |
 
 `repository` 包含 `root`、`name`、`branch`、`detached`、`sha`、`commitUrl`、`remote`、`dirty: { changed, staged, unstaged, untracked }`、`upstream`、`ahead`、`behind` 和 `worktree: { linked, mainRoot, count }`。
 
@@ -105,8 +109,8 @@ npm test
 
 | 路径 | 用途 |
 |---|---|
-| `index.js` | Host 接口和 Git 操作 |
-| `client.js` | 状态条、分支 / 工作树弹窗和右侧改动面板 |
+| `index.js` | Host 接口和 Git 操作（含「Git 历史」的三条只读接口） |
+| `client.js` | 状态条、分支 / 工作树弹窗、右侧改动面板，以及主对话区的「Git 历史」标签页 |
 | `cordis.patch.yml` | 注册 `git-bar` 组件的 bundle patch |
 | `locale/*.json` | 插件管理器中的中英文元数据 |
 | `icon.svg` | 插件图标 |
