@@ -48,7 +48,7 @@ DeepSeek Harness 的 Git 状态条插件：在会话输入框上方、工作区�
 在应用自己的插件管理器中找到安装 / 添加插件入口，填入以下固定提交的安装来源：
 
 ```text
-git+https://github.com/mjnhmd/dsh-git-bar.git#d0a00951921ff92f16a16d6042834bad09542feb
+git+https://github.com/mjnhmd/dsh-git-bar.git#fbe63132ffea7f8dcbddd068ad10b710bf4c07ee
 ```
 
 也可在已安装的社区 `dshmarket` 中搜索 **dsh-git-bar** 安装。不要假定桌面应用使用 CLI 的 `web` profile；请用桌面应用自带的插件管理器。
@@ -56,7 +56,7 @@ git+https://github.com/mjnhmd/dsh-git-bar.git#d0a00951921ff92f16a16d6042834bad09
 ### 普通 dsh web
 
 ```bash
-dsh plugin --profile web add "git+https://github.com/mjnhmd/dsh-git-bar.git#d0a00951921ff92f16a16d6042834bad09542feb"
+dsh plugin --profile web add "git+https://github.com/mjnhmd/dsh-git-bar.git#fbe63132ffea7f8dcbddd068ad10b710bf4c07ee"
 ```
 
 自定义 profile 请将 `web` 替换为实际使用的名称。本地开发可使用：

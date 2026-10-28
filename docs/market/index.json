@@ -124,6 +124,18 @@
           "engines": {
             "dsh": ">=0.2.1-rc.2"
           }
+        },
+        {
+          "version": "0.6.0",
+          "publishTimestamp": 1793181421,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/mjnhmd/dsh-git-bar",
+            "commit": "fbe63132ffea7f8dcbddd068ad10b710bf4c07ee"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2"
+          }
         }
       ]
     }
