@@ -380,7 +380,7 @@ window.__ModuleLoader__.load({
         lineHeight: '18px',
         padding: '0 8px',
         borderRadius: '6px',
-        border: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         background: 'transparent',
         color: 'inherit',
         cursor: 'pointer',
@@ -416,7 +416,7 @@ window.__ModuleLoader__.load({
       },
       menuError: {
         padding: '4px 10px 8px',
-        color: 'var(--dsw-alias-state-error-label, #b91c1c)',
+        color: 'var(--dsw-alias-state-error-primary, #b91c1c)',
         fontSize: '11.5px',
         whiteSpace: 'pre-wrap',
       },
@@ -1537,8 +1537,8 @@ window.__ModuleLoader__.load({
       if (line.startsWith('+++') || line.startsWith('---')) {
         return { color: 'var(--dsw-alias-label-tertiary, #9ca3af)' }
       }
-      if (line.startsWith('+')) return { color: 'var(--dsw-alias-state-success-label, #15803d)' }
-      if (line.startsWith('-')) return { color: 'var(--dsw-alias-state-error-label, #b91c1c)' }
+      if (line.startsWith('+')) return { color: 'var(--dsw-alias-state-success-primary, #15803d)' }
+      if (line.startsWith('-')) return { color: 'var(--dsw-alias-state-error-primary, #b91c1c)' }
       if (line.startsWith('@@')) return { color: 'var(--dsw-alias-label-tertiary, #9ca3af)' }
       return undefined
     }
@@ -1708,7 +1708,7 @@ window.__ModuleLoader__.load({
         flex: '1 1 auto',
         minHeight: 0,
         maxHeight: 'calc(100vh - 210px)',
-        border: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         borderRadius: '10px',
         overflow: 'hidden',
       },
@@ -1718,7 +1718,7 @@ window.__ModuleLoader__.load({
         gap: '8px',
         padding: '6px 10px',
         flex: 'none',
-        borderBottom: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        borderBottom: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
       },
       title: { fontWeight: 600, flex: 'none' },
       count: {
@@ -1732,9 +1732,9 @@ window.__ModuleLoader__.load({
         padding: '3px 8px',
         font: 'inherit',
         fontSize: '12px',
-        color: 'inherit',
-        background: 'var(--dsw-alias-bg-secondary, #f3f4f6)',
-        border: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        color: 'var(--dsw-alias-label-primary, inherit)',
+        background: 'var(--dsw-alias-bg-layer-2, #f3f4f6)',
+        border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         borderRadius: '6px',
       },
       body: { display: 'flex', flex: '1 1 auto', minHeight: 0 },
@@ -1759,7 +1759,7 @@ window.__ModuleLoader__.load({
         color: 'inherit',
         cursor: 'pointer',
       },
-      rowActive: { background: 'var(--dsw-alias-bg-secondary, #eef2f7)' },
+      rowActive: { background: 'var(--dsw-alias-interactive-bg-active, #eef2f7)' },
       subject: {
         flex: '1 1 auto',
         minWidth: 0,
@@ -1801,7 +1801,7 @@ window.__ModuleLoader__.load({
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
-        borderLeft: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        borderLeft: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         overflow: 'hidden',
       },
       detailHead: {
@@ -1842,7 +1842,7 @@ window.__ModuleLoader__.load({
         fontSize: '11px',
         fontWeight: 600,
         color: 'var(--dsw-alias-label-secondary, #6b7280)',
-        borderTop: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        borderTop: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
       },
       files: { flex: '0 1 auto', minHeight: 0, overflow: 'auto', padding: '0 4px 4px' },
       file: {
@@ -1859,7 +1859,7 @@ window.__ModuleLoader__.load({
         color: 'inherit',
         cursor: 'pointer',
       },
-      fileActive: { background: 'var(--dsw-alias-bg-secondary, #eef2f7)', borderRadius: '6px' },
+      fileActive: { background: 'var(--dsw-alias-interactive-bg-active, #eef2f7)', borderRadius: '6px' },
       fileStatus: {
         flex: 'none',
         width: '12px',
@@ -1887,7 +1887,7 @@ window.__ModuleLoader__.load({
         overflow: 'auto',
         margin: 0,
         padding: '8px 10px',
-        borderTop: '1px solid var(--dsw-alias-border-secondary, #e5e7eb)',
+        borderTop: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
         fontSize: '11.5px',
         lineHeight: '17px',
@@ -2082,7 +2082,7 @@ window.__ModuleLoader__.load({
           cy: middle,
           r: row.merge ? 4 : 3.4,
           fill: LANE_COLORS[Math.abs(row.color ?? 0) % LANE_COLORS.length],
-          stroke: row.merge ? 'none' : 'var(--dsw-alias-bg-primary, #fff)',
+          stroke: row.merge ? 'none' : 'var(--dsw-alias-bg-base, #fff)',
           strokeWidth: row.merge ? 0 : 1.2,
         }),
       )
@@ -2107,9 +2107,9 @@ window.__ModuleLoader__.load({
      * @returns 一个颜色。
      */
     function refBadgeColor(kind) {
-      if (kind === 'tag') return 'var(--dsw-alias-state-warning-label, #b45309)'
-      if (kind === 'remote') return 'var(--dsw-alias-state-info-label, #1d4ed8)'
-      if (kind === 'head') return 'var(--dsw-alias-state-success-label, #15803d)'
+      if (kind === 'tag') return 'var(--dsw-alias-state-warn-label, #b45309)'
+      if (kind === 'remote') return 'var(--dsw-alias-state-business-primary, #1d4ed8)'
+      if (kind === 'head') return 'var(--dsw-alias-state-success-primary, #15803d)'
       return 'var(--dsw-alias-label-secondary, #6b7280)'
     }
 
