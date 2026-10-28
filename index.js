@@ -8,7 +8,7 @@
  *   GET  /dsh-git-bar/worktrees?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/changes?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/diff?sessionId=<id>[&dir=<absolute path>]&path=<relative>[&staged=0|1]
- *   GET  /dsh-git-bar/log?sessionId=<id>[&dir=<absolute path>][&limit=<1..300>]
+ *   GET  /dsh-git-bar/log?sessionId=<id>[&dir=<absolute path>][&limit=<1..300>][&branch=<ref>][&author=<text>]
  *   GET  /dsh-git-bar/commit?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>
  *   GET  /dsh-git-bar/commit-diff?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>&path=<relative>
  *   POST /dsh-git-bar/branches/checkout   {"sessionId","dir","branch"}
@@ -134,6 +134,12 @@ const HASH_PATTERN = /^[0-9a-f]{4,40}$/i
 
 /** C0 controls and DEL, which no path may contain. */
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/
+
+/** Longest accepted `/log` filter value; a longer one is a bug, not a query. */
+const MAX_FILTER_CHARS = 200
+
+/** The only shape a `branch` filter may have: a refname, never an option or a range. */
+const BRANCH_PATTERN = /^[A-Za-z0-9._/-]+$/
 
 /**
  * Run git in one directory and resolve with its output.
@@ -789,6 +795,58 @@ function validHash(value) {
 }
 
 /**
+ * Read one optional `/log` filter from the query string.
+ *
+ * An absent parameter and an empty one both mean "no filter": a Client that
+ * always appends `branch=&author=` should still see the whole graph.
+ *
+ * @param url - parsed request URL.
+ * @param key - parameter name, `branch` or `author`.
+ * @returns the trimmed value, or null when the filter is not in use.
+ */
+function filterValue(url, key) {
+  const raw = url.searchParams.get(key)
+  if (raw === null) return null
+  const value = raw.trim()
+  return value === '' ? null : value
+}
+
+/**
+ * Decide whether a caller-supplied `branch` filter may be handed to git as a revision.
+ *
+ * The character set is closed — no space, quote, glob or `~`/`^`/`:` revision
+ * operator — a leading `-` is refused so the value can never be read as an
+ * option, and `..` is refused so it can never become a range.
+ *
+ * @param value - candidate branch or ref name.
+ * @returns true when the value is a plain refname.
+ */
+function validBranchFilter(value) {
+  if (typeof value !== 'string' || value === '') return false
+  if (value.length > MAX_FILTER_CHARS) return false
+  if (!BRANCH_PATTERN.test(value)) return false
+  if (value.startsWith('-')) return false
+  return !value.includes('..')
+}
+
+/**
+ * Decide whether a caller-supplied `author` filter may be handed to git.
+ *
+ * git reads `--author` as a regular expression, so the text is left alone
+ * beyond the two rules that keep it a value: it is bounded, and it carries no
+ * control characters. A pattern git itself then rejects is reported as a 400
+ * once the command has run.
+ *
+ * @param value - candidate author text.
+ * @returns true when the value may be passed as `--author=<text>`.
+ */
+function validAuthorFilter(value) {
+  if (typeof value !== 'string' || value === '') return false
+  if (value.length > MAX_FILTER_CHARS) return false
+  return !CONTROL_PATTERN.test(value)
+}
+
+/**
  * Read the page size a `/log` request asks for.
  *
  * An absent, empty or non-numeric `limit` means the default; a numeric one is
@@ -947,32 +1005,53 @@ function parseLog(text) {
  * Read one page of the commit graph.
  *
  * `--all` widens the log to every ref — that is what makes the graph show
- * branches that are not checked out — and `--topo-order` keeps children above
- * their parents so the Client can draw lanes downward. One record beyond the
- * page size is what tells whether another page exists.
+ * branches that are not checked out. A `branch` filter replaces it with that
+ * one revision, because the caller asked for a single line of history; an
+ * `author` filter narrows whichever of the two it finds without changing what
+ * is being walked. `--topo-order` keeps children above their parents so the
+ * Client can draw lanes downward, and one record beyond the page size is what
+ * tells whether another page exists.
  *
  * An unborn repository logs an empty history and exits 0, so a failing `git
- * log` means git cannot read this directory as a repository at all.
+ * log` inside a work tree is a filter git could not resolve, and outside one it
+ * is a directory that is not a repository at all.
  *
  * @param dir - absolute directory, whether or not it is a repository.
  * @param limit - page size, already clamped.
- * @returns the commits, the paging flags, and the reason when there are none.
+ * @param filters - `{ branch, author }`, either null when that filter is off.
+ * @returns `{ status, body }`; the body carries no `dir` or `filters`.
  */
-async function readLog(dir, limit) {
-  const result = await runGit(
-    dir,
-    ['log', '--all', '--topo-order', '--decorate=full', '-n', String(limit + 1), `--format=${LOG_FORMAT}`],
-    { trim: false },
-  )
+async function readLog(dir, limit, filters) {
+  const args = ['log']
+  if (filters.branch === null) args.push('--all')
+  else args.push(filters.branch)
+  args.push('--topo-order', '--decorate=full', '-n', String(limit + 1), `--format=${LOG_FORMAT}`)
+  if (filters.author !== null) args.push(`--author=${filters.author}`)
+  const result = await runGit(dir, args, { trim: false })
   if (!result.ok && !result.overflow) {
-    return { commits: [], hasMore: false, truncated: false, reason: 'not-a-repository' }
+    if (await insideWorkTree(dir)) {
+      return {
+        status: 400,
+        body: {
+          commits: [],
+          hasMore: false,
+          truncated: false,
+          reason: filters.branch === null ? 'invalid-author' : 'unknown-ref',
+          message: failureMessage(result),
+        },
+      }
+    }
+    return { status: 200, body: { commits: [], hasMore: false, truncated: false, reason: 'not-a-repository' } }
   }
   const commits = parseLog(result.out)
   const hasMore = commits.length > limit
   return {
-    commits: hasMore ? commits.slice(0, limit) : commits,
-    hasMore,
-    truncated: result.overflow,
+    status: 200,
+    body: {
+      commits: hasMore ? commits.slice(0, limit) : commits,
+      hasMore,
+      truncated: result.overflow,
+    },
   }
 }
 
@@ -1322,10 +1401,17 @@ export function apply(ctx) {
         kind: 'exact',
         path: ROUTE_LOG,
         handler: (req, res) =>
-          serveGet(ctx, req, res, 'log-failed', async (dir, url) => ({
-            status: 200,
-            body: { dir, ...(await readLog(dir, parseLimit(url))) },
-          })),
+          serveGet(ctx, req, res, 'log-failed', async (dir, url) => {
+            const filters = { branch: filterValue(url, 'branch'), author: filterValue(url, 'author') }
+            if (filters.branch !== null && !validBranchFilter(filters.branch)) {
+              return { status: 400, body: { error: 'invalid-branch' } }
+            }
+            if (filters.author !== null && !validAuthorFilter(filters.author)) {
+              return { status: 400, body: { error: 'invalid-author' } }
+            }
+            const page = await readLog(dir, parseLimit(url), filters)
+            return { status: page.status, body: { dir, ...page.body, filters } }
+          }),
       }),
     `git-bar: GET ${ROUTE_LOG}`,
   )

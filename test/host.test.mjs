@@ -653,7 +653,14 @@ console.log('42 limit clamping OK')
 // 43. log outside a repository degrades to an empty page
 r = await call(`/dsh-git-bar/log?dir=${dirParam(plain)}`)
 assert.equal(r.status, 200)
-assert.deepEqual(r.json, { dir: plain, commits: [], hasMore: false, truncated: false, reason: 'not-a-repository' })
+assert.deepEqual(r.json, {
+  dir: plain,
+  commits: [],
+  hasMore: false,
+  truncated: false,
+  reason: 'not-a-repository',
+  filters: { branch: null, author: null },
+})
 console.log('43 log not-a-repository OK')
 
 // 44. commit lists the files it touched, with counts and the message body
@@ -766,6 +773,121 @@ assert.equal(r.status, 503)
 assert.deepEqual(r.json, { error: 'no-connection' })
 connected = true
 console.log('48 history route guards OK')
+
+// 49. a branch filter walks that ref instead of every ref, and is echoed back
+// The two branches diverge after `first`, so each one can only reach its own tip.
+const filtered = makeRepo(join(base, 'filtered'))
+GIT(filtered, 'checkout', '-q', '-b', 'side')
+writeFileSync(join(filtered, 's.txt'), 's\n')
+GIT(filtered, 'add', 's.txt')
+GIT(
+  filtered,
+  '-c',
+  'user.name=alice',
+  '-c',
+  'user.email=alice@example.com',
+  'commit',
+  '-q',
+  '-m',
+  'side work by alice',
+)
+GIT(filtered, 'checkout', '-q', 'main')
+writeFileSync(join(filtered, 'a.txt'), 'one\ntwo\n')
+GIT(filtered, ...IDENTITY, 'commit', '-q', '-am', 'second by t')
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&branch=side`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.filters, { branch: 'side', author: null })
+// `side` branched off `first`, so it holds its own commit plus that ancestor —
+// and not the `second by t` commit that only `main` can reach
+assert.deepEqual(
+  r.json.commits.map((commit) => commit.subject),
+  ['side work by alice', 'first'],
+)
+assert.equal(r.json.hasMore, false)
+assert.equal(r.json.truncated, false)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&branch=main`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.filters, { branch: 'main', author: null })
+assert.deepEqual(
+  r.json.commits.map((commit) => commit.subject),
+  ['second by t', 'first'],
+)
+assert.equal(r.json.commits.some((commit) => commit.subject === 'side work by alice'), false)
+console.log('49 log branch filter OK', r.json.commits.map((commit) => commit.subject).join(' | '))
+
+// 50. a branch that is not a plain refname is refused, one git cannot resolve is a 400
+for (const bad of ['-x', 'a..b', 'ma in', 'HEAD~1', 'a^*', 'x'.repeat(201)]) {
+  r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&branch=${dirParam(bad)}`)
+  assert.equal(r.status, 400, `expected 400 for branch ${JSON.stringify(bad)}`)
+  assert.deepEqual(r.json, { error: 'invalid-branch' })
+}
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&branch=no-such-branch`)
+assert.equal(r.status, 400)
+assert.equal(r.json.reason, 'unknown-ref')
+assert.equal(r.json.dir, filtered)
+assert.deepEqual(r.json.commits, [])
+assert.equal(r.json.hasMore, false)
+assert.equal(r.json.truncated, false)
+assert.equal(r.json.filters.branch, 'no-such-branch')
+assert.match(r.json.message, /unknown revision|ambiguous argument/i)
+console.log('50 log branch guards OK', JSON.stringify(r.json.message))
+
+// 51. an author filter narrows the graph without picking a branch
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&author=alice`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.filters, { branch: null, author: 'alice' })
+assert.deepEqual(
+  r.json.commits.map((commit) => commit.subject),
+  ['side work by alice'],
+)
+// --all still applies, so both of `t`'s commits on both branches are in reach
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&author=t`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.filters, { branch: null, author: 't' })
+assert.deepEqual(
+  r.json.commits.map((commit) => commit.subject).sort(),
+  ['first', 'second by t'],
+)
+// --author matches the whole `Name <email>` ident, so an address works too
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&author=alice%40example.com`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits.length, 1)
+console.log('51 log author filter OK', r.json.filters.author)
+
+// 52. an author that is not a bounded control-free value is refused
+for (const bad of ['x'.repeat(201), 'ali\nce', 'ali\u0007ce', 'tab\there']) {
+  r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&author=${dirParam(bad)}`)
+  assert.equal(r.status, 400, `expected 400 for author ${JSON.stringify(bad)}`)
+  assert.deepEqual(r.json, { error: 'invalid-author' })
+}
+console.log('52 log author guards OK')
+
+// 53. with no filter in use both keys are null, and a filtered call still degrades
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}`)
+assert.deepEqual(r.json.filters, { branch: null, author: null })
+assert.equal(r.json.commits.length, 3)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&branch=&author=`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.filters, { branch: null, author: null })
+assert.equal(r.json.commits.length, 3)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(filtered)}&branch=side&author=alice`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.filters, { branch: 'side', author: 'alice' })
+assert.deepEqual(
+  r.json.commits.map((commit) => commit.subject),
+  ['side work by alice'],
+)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(plain)}&branch=main&author=t`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json, {
+  dir: plain,
+  commits: [],
+  hasMore: false,
+  truncated: false,
+  reason: 'not-a-repository',
+  filters: { branch: 'main', author: 't' },
+})
+console.log('53 log filters echo OK')
 
 rmSync(base, { recursive: true, force: true })
 console.log('\nALL HOST TESTS PASSED')
