@@ -54,6 +54,8 @@ window.__ModuleLoader__.load({
     const HISTORY_PAGE = 60
     /** Distance from the list bottom, in px, that triggers the next page. */
     const HISTORY_SCROLL_SLACK = 120
+    /** Tallest the filter dropdown's option list may get before it scrolls. */
+    const MENU_LIST_MAX = 240
     /** Width of one graph lane. */
     const LANE_W = 12
     /** Height of one history row; the graph cell is drawn to the same grid. */
@@ -2259,6 +2261,9 @@ window.__ModuleLoader__.load({
       const [diff, setDiff] = React.useState({ phase: 'idle', text: '', truncated: false })
       const [menu, setMenu] = React.useState('')
       const [menuQuery, setMenuQuery] = React.useState('')
+      // 面板贴在下拉按钮下方：算出按钮的视口位置后用 fixed 定位，
+      // 免得被外层 overflow:hidden 裁掉——被裁掉时面板看着在、滚轮却滚不动。
+      const [menuAnchor, setMenuAnchor] = React.useState(null)
       const [branches, setBranches] = React.useState([])
       const [authors, setAuthors] = React.useState([])
       const [authorRows, setAuthorRows] = React.useState([])
@@ -2297,9 +2302,17 @@ window.__ModuleLoader__.load({
         return body
       }
 
+      // 同一筛选条件下的「再要一页」和「换筛选」要区别对待：续页不能把已有提交清空，
+      // 否则列表瞬间变矮，浏览器的 scrollTop 被夹回顶部，看起来就是「一加载更多就跳回最上面」。
+      const pageKey = `${sessionId}\u0000${dir}\u0000${page.nonce}\u0000${page.branch}\u0000${page.author}`
+      const grownRef = React.useRef({ key: '', limit: 0 })
+
       React.useEffect(() => {
         let live = true
-        setLog({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
+        const grown = grownRef.current.key === pageKey && page.limit > grownRef.current.limit
+        grownRef.current = { key: pageKey, limit: page.limit }
+        if (grown) setLog((current) => (current.commits.length === 0 ? current : { ...current, phase: 'more' }))
+        else setLog({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
         getJson(LOG_ROUTE, { limit: page.limit, branch: page.branch, author: page.author })
           .then((body) => {
             if (!live) return
@@ -2507,7 +2520,29 @@ window.__ModuleLoader__.load({
       const closeMenu = () => {
         setMenu('')
         setMenuQuery('')
+        setMenuAnchor(null)
       }
+
+      // 打开时量一次按钮边界，面板才能稳稳贴在它下面而不被裁剪。
+      const openMenu = (kind, event) => {
+        setMenu(kind)
+        setMenuQuery('')
+        const node = event?.currentTarget
+        const rect = node && typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null
+        setMenuAnchor(rect ? { left: rect.left, bottom: rect.bottom } : null)
+      }
+
+      // 面板是浮动层：点别处就收起，否则它会一直盖在提交列表上。
+      React.useEffect(() => {
+        if (menu === '' || typeof document === 'undefined') return undefined
+        const onDown = (event) => {
+          const target = event?.target
+          const inside = target && typeof target.closest === 'function' && target.closest('[data-history-menu], [data-history-chip]')
+          if (!inside) closeMenu()
+        }
+        document.addEventListener('mousedown', onDown)
+        return () => document.removeEventListener('mousedown', onDown)
+      }, [menu])
 
       const filterChip = (kind, label, allLabel, options) => {
         // 面板里带搜索框：分支和提交人都可能成百上千，只能打字找。
@@ -2519,6 +2554,17 @@ window.__ModuleLoader__.load({
           needle === ''
             ? items
             : items.filter((item) => item.label.toLowerCase().includes(needle))
+        // 有按钮边界就用 fixed 贴近它，并按窗口剩余高度收紧列表；量不到就退回绝对定位。
+        const anchor = menu === kind ? menuAnchor : null
+        const panelStyle =
+          anchor === null
+            ? historyStyles.menu
+            : { ...historyStyles.menu, position: 'fixed', left: `${anchor.left}px`, top: `${anchor.bottom + 4}px` }
+        const room =
+          anchor !== null && typeof window !== 'undefined' && typeof window.innerHeight === 'number'
+            ? window.innerHeight - anchor.bottom - 24
+            : MENU_LIST_MAX + 40
+        const listStyle = { ...historyStyles.menuList, height: `${Math.max(96, Math.min(MENU_LIST_MAX, room - 40))}px` }
         return h(
           'div',
           { style: historyStyles.chipWrap },
@@ -2531,12 +2577,9 @@ window.__ModuleLoader__.load({
               'aria-haspopup': 'listbox',
               'aria-expanded': menu === kind ? 'true' : 'false',
               'data-history-chip': kind,
-              onClick: () => {
+              onClick: (event) => {
                 if (menu === kind) closeMenu()
-                else {
-                  setMenu(kind)
-                  setMenuQuery('')
-                }
+                else openMenu(kind, event)
               },
             },
             page[kind] === '' ? allLabel : page[kind],
@@ -2545,7 +2588,7 @@ window.__ModuleLoader__.load({
             ? null
             : h(
                 'div',
-                { style: historyStyles.menu, role: 'listbox', 'data-history-menu': kind },
+                { style: panelStyle, role: 'listbox', 'data-history-menu': kind },
                 h(
                   'div',
                   { style: historyStyles.menuSearch },
@@ -2565,7 +2608,7 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   'div',
-                  { style: historyStyles.menuList, 'data-history-menu-list': kind },
+                  { style: listStyle, 'data-history-menu-list': kind },
                   shown.length === 0
                     ? h('div', { style: historyStyles.menuHint }, t('history.noOption'))
                     : shown.map((item) =>
@@ -2680,9 +2723,11 @@ window.__ModuleLoader__.load({
                         h('span', { style: historyStyles.when }, formatWhen(commit.when, t)),
                       )
                     }),
-                    log.hasMore
-                      ? h('div', { style: historyStyles.hint, 'data-history-more': '' }, t('history.more'))
-                      : null,
+                    log.phase === 'more'
+                      ? h('div', { style: historyStyles.hint, 'data-history-more': 'loading' }, t('history.loading'))
+                      : log.hasMore
+                        ? h('div', { style: historyStyles.hint, 'data-history-more': '' }, t('history.more'))
+                        : null,
                   )
 
       const files =

@@ -32,3 +32,21 @@
 - 错误分类：host 抛 `workspace/invalid-path`（目录已不存在的场景，如 worktree 已被 `git worktree remove`）
   时返回 `'invalid-path'`，弹层显示 `worktree.invalidPath`「该目录已不存在，无法新建会话」；
   其余异常仍是 `unsupported`，并 `console.warn` 出原始 message。
+
+## 用户反馈「面板滚不动 / 一加载更多就跳回顶部」（0.5.1 修复）
+- 报错现象（用户实测，附截图）：①分支筛选面板鼠标滚轮不动；②滚到底自动加载更早提交后，列表跳回最顶部。
+- ②的根因确实存在：`HistoryView` 的拉取副作用每次都以
+  `setLog({ phase: 'loading', commits: [], hasMore: false, ... })` 开头，续页时把已渲染的提交清空，
+  列表高度瞬间塌到 0，浏览器把 `scrollTop` 夹回顶部；新数据回来后用户已经站在列表最上方。
+- 修复：用 `pageKey`（sessionId/dir/nonce/branch/author）+ `grownRef` 区分「续页」与「换筛选」，
+  续页只把 `phase` 置为 `'more'` 并保留 `commits`，footer 显示读取中；换筛选才清空。
+  `onListScroll` 与「一页装不满自动补页」两个副作用都只认 `phase === 'ready'`，所以 `'more'` 期间不会连环触发。
+- ①的代码侧加固：原先的 `menu` 是 `position: absolute` 且祖先 `.view` 有 `overflow: hidden`，
+  在矮窗口里会被裁掉一部分——被裁时列表看着在、滚轮却滚不动。现在打开面板时用
+  `getBoundingClientRect()` 量按钮位置，改成 `position: fixed` 贴住按钮下沿（逃出 overflow 裁剪），
+  并按「窗口高度 − 按钮下沿」收紧列表高度（`MENU_LIST_MAX = 240` 上限，最少 96px），
+  `menuList` 也因此拿到了显式 `height`，不只靠 `maxHeight`。
+- 附带的可用性修补：面板是浮动层，原先点空白处不收起，会一直盖住提交列表；现在监听 document `mousedown`，
+  点到面板与 chip 之外就关闭。
+- 待用户确认：0.5.0 是 11:16 推的，用户 11:19 反馈——若面板里已有搜索框，说明加载的是 0.5.0 之后的代码，
+  但当时列表未被 240px 截断，怀疑桌面端仍在跑更早一次加载的模块实例。修复后需重启桌面端再验。

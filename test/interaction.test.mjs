@@ -515,6 +515,36 @@ const manualMore = findAll(historyTree, (node) => node.type === 'button' && text
 assert.equal(manualMore.length, 0, 'no manual load-more button any more')
 console.log('13 infinite scroll OK:', pagedLog.slice(pagedLog.indexOf('?')))
 
+// 13b. 续页不能清空已经加载的提交：清空会让列表瞬间变矮，scrollTop 被夹回顶部，
+//      表现就是「一滚到底加载更多就跳回最上面」。
+//      先切到 author=Ada（重置成第一页、hasMore 为 true），再滚一次触发续页。
+const adachip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'author')[0]
+adachip.props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+findAll(historyTree, (node) => node.props['data-history-option'] === 'Ada')[0].props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+const rowsBeforeMore = findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string').length
+assert.ok(rowsBeforeMore > 0, `page already has rows: ${rowsBeforeMore}`)
+const scrolledList = findAll(historyTree, (node) => node.props['data-history-list'] !== undefined)[0]
+scrolledList.props.onScroll({ currentTarget: { scrollTop: 900, clientHeight: 300, scrollHeight: 1200 } })
+historyTree = runtime.rerender(historyElement) // 只跑副作用，fetch 还没回来
+const rowsDuringMore = findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string').length
+assert.equal(rowsDuringMore, rowsBeforeMore, 'rows stay mounted while the next page is in flight')
+const moreHintDuring = findAll(historyTree, (node) => node.props['data-history-more'] !== undefined)[0]
+assert.equal(moreHintDuring?.props['data-history-more'], 'loading', 'footer reports the pending page instead of blanking the list')
+await flush()
+historyTree = runtime.rerender(historyElement)
+const moreHintAfter = findAll(historyTree, (node) => node.props['data-history-more'] !== undefined)[0]
+assert.notEqual(moreHintAfter?.props['data-history-more'], 'loading', 'footer goes back to idle once the page lands')
+assert.equal(
+  findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string').length,
+  rowsBeforeMore,
+  'the landed page renders the same rows for this author',
+)
+console.log('13b load-more keeps rows OK:', rowsBeforeMore, 'rows')
+
 // 14. 下拉面板：搜索框固定在顶部、选项区自己滚动，键入就过滤
 const openBranchChip = () => {
   const chip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'branch')[0]
@@ -557,6 +587,31 @@ assert.equal(
   'Escape closes the panel',
 )
 console.log('14 panel search + scroll OK')
+
+// 14b. 面板贴住按钮、用 fixed 逃出 overflow:hidden 祖先，并按窗口剩余高度收紧：
+//      被祖先裁掉时面板看着在、滚轮却滚不动，所以定位和高度都得管住。
+const anchoredChip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'branch')[0]
+const openWithRect = (innerHeight) => {
+  globalThis.window = { innerHeight }
+  anchoredChip.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 24, bottom: 120 }) } })
+  const tree = runtime.rerender(historyElement)
+  historyTree = tree
+  const panel = findAll(tree, (node) => node.props['data-history-menu'] === 'branch')[0]
+  const list = findAll(tree, (node) => node.props['data-history-menu-list'] === 'branch')[0]
+  return { panel, list }
+}
+const tall = openWithRect(900)
+assert.equal(tall.panel.props.style.position, 'fixed', 'panel escapes overflow:hidden ancestors')
+assert.equal(tall.panel.props.style.left, '24px', 'panel lines up with the chip')
+assert.equal(tall.panel.props.style.top, '124px', 'panel hangs right under the chip')
+assert.equal(tall.list.props.style.height, '240px', 'roomy window: list keeps the full cap')
+anchoredChip.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 24, bottom: 120 }) } })
+historyTree = runtime.rerender(historyElement)
+const short = openWithRect(300)
+assert.equal(short.list.props.style.height, '116px', 'short window: list shrinks to the space left below the chip')
+assert.equal(short.list.props.style.overflowY, 'auto', 'shrunk list still scrolls')
+globalThis.window = undefined
+console.log('14b panel anchoring OK')
 
 // 15. /authors 拉不到时退回已加载提交里的作者，筛选照常可用
 authorsMode = 'fail'
