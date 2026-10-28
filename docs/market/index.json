@@ -119,7 +119,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/mjnhmd/dsh-git-bar",
-            "commit": "e56724a"
+            "commit": "e56724aeb7ce8cb3b411d34ce90853222c0bf92f"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2"
