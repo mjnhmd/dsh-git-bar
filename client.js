@@ -37,12 +37,29 @@ window.__ModuleLoader__.load({
 
     /** 有 react-dom 就把浮层 portal 到 body，否则原样返回。 */
     function portalToBody(node) {
-      if (ReactDOM === null || typeof ReactDOM.createPortal !== 'function') return node
+      if (ReactDOM === null || typeof ReactDOM.createPortal !== 'function') {
+        warnNoPortal()
+        return node
+      }
       if (typeof document === 'undefined' || document.body === null) return node
       try {
         return ReactDOM.createPortal(node, document.body)
       } catch {
+        warnNoPortal()
         return node
+      }
+    }
+
+    let warnedNoPortal = false
+    /**
+     * 落回就地渲染时面板会被祖先的 transform / overflow 裁掉，用户只看到「滚不动的几行」。
+     * 这条只在开发时看得见，但比默默坏掉强：真出问题直接在 Console 里看得见原因。
+     */
+    function warnNoPortal() {
+      if (warnedNoPortal) return
+      warnedNoPortal = true
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn('[git-bar] react-dom/createPortal 不可用，筛选面板退回就地渲染，可能被祖先裁剪')
       }
     }
 
@@ -2654,7 +2671,14 @@ window.__ModuleLoader__.load({
             : portalToBody(
                 h(
                   'div',
-                  { style: panelStyle, role: 'listbox', 'data-history-menu': kind },
+                  {
+                    style: panelStyle,
+                    role: 'listbox',
+                    'data-history-menu': kind,
+                    // 滚轮/触摸只在面板里滚：宿主界面在滚动容器里，祖先的 wheel 监听一 preventDefault 就滚不动。
+                    onWheel: (event) => event.stopPropagation(),
+                    onTouchMove: (event) => event.stopPropagation(),
+                  },
                   h(
                     'div',
                     { style: historyStyles.menuSearch },

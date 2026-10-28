@@ -658,6 +658,9 @@ assert.equal(flippedPanel.props.style.top, 'auto', 'panel flips above the chip w
 assert.equal(flippedPanel.props.style.bottom, '104px', 'flipped panel sits right above the chip')
 assert.equal(flippedList.props.style.height, '240px', 'flipped panel keeps the full cap')
 assert.equal(flippedPanel.props.style.zIndex, '1200', 'panel outranks the host UI it is portaled over')
+let stoppedWheel = 0
+flippedPanel.props.onWheel({ stopPropagation: () => { stoppedWheel += 1 } })
+assert.equal(stoppedWheel, 1, 'a wheel inside the panel never reaches the host scrolling container')
 chipNow().props.onClick({ currentTarget: { getBoundingClientRect: lowRect } })
 historyTree = runtime.rerender(historyElement)
 console.log('14c panel flips above the chip OK')
