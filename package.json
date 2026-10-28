@@ -35,6 +35,8 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "README.zh.md",
+    "screenshots.json",
     "test/*.mjs",
     "docs/*.md",
     "docs/*.png",

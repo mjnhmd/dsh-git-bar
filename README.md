@@ -1,5 +1,7 @@
 # dsh-git-bar
 
+English | [简体中文](README.zh.md)
+
 A DeepSeek Harness bundle that adds one ambient row above the composer showing
 the Session's git context:
 
@@ -45,18 +47,28 @@ do:
 
 ## Install
 
-From a Git checkout (pin the commit; add `&path:/plugins/dsh-git-bar` when the
-package is not at the repository root):
+Requires **DSH >= 0.2.1-rc.2** and `git` on the Host's PATH. The plugin is
+distributed through GitHub; an npm account is not required.
 
-```bash
-dsh plugin --profile desktop add "git+https://github.com/mjnhmd/dsh-git-bar.git#2d3e0408376127196a4c18e8b1e1c79389a166f5"
+For the desktop app, use its own Plugin Manager's install/add entry and supply:
+
+```text
+git+https://github.com/mjnhmd/dsh-git-bar.git#2d3e0408376127196a4c18e8b1e1c79389a166f5
 ```
 
-From npm, or from a local checkout during development:
+Alternatively, search for **dsh-git-bar** in the community `dshmarket` plugin.
+The desktop app does not necessarily use a CLI profile named `web` or `desktop`.
+
+For a regular `dsh web` instance (replace `web` if you use another profile):
 
 ```bash
-dsh plugin --profile desktop add dsh-git-bar@0.1.0
-dsh plugin --profile desktop add link:/absolute/path/to/plugins/dsh-git-bar
+dsh plugin --profile web add "git+https://github.com/mjnhmd/dsh-git-bar.git#2d3e0408376127196a4c18e8b1e1c79389a166f5"
+```
+
+For local development:
+
+```bash
+dsh plugin --profile web add link:/absolute/path/to/dsh-git-bar
 ```
 
 The Host half loads at startup, so restart the app after the first install; the
@@ -72,6 +84,19 @@ yourself and add under **插件 → 发现 → 添加索引源**. `docs/market-i
 is a ready template, `scripts/validate-index.mjs` checks it against DSH's own
 validator, and [docs/PUBLISH.zh.md](docs/PUBLISH.zh.md) walks through pushing the
 repository, publishing to npm, and publishing the index.
+
+Community listing: <https://awesome-dsh-plugin.com/p/mjnhmd/dsh-git-bar/>.
+This is separate from the self-hosted index above.
+
+### Marketplace screenshots
+
+The root [screenshots.json](screenshots.json) declares the three preview images
+in display order, using paths relative to that file. The community directory's
+next nightly build picks up the manifest after it is pushed; changing a local
+file or embedding images in the README alone does not update the listing card.
+
+All previews use fictional data rendered from `scripts/previews/`. Do not replace
+them with screenshots containing real workspace, session or private project data.
 
 ## Host API
 
