@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Git Bar",
-    "description": "Shows the Session's git repository, branch, working-tree changes, and ahead/behind counts above the composer."
+    "description": "Shows the Session's git repository, branch, working-tree changes, and ahead/behind counts above the composer, plus a Git history tab with a commit graph, commit details, per-file diffs and branch/author filters."
   }
 }

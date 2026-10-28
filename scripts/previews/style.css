@@ -164,6 +164,8 @@ body {
   background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px;
 }
 .hhead .refresh { color: #6b7280; }
+.hfilters { display: flex; align-items: center; gap: 6px; padding: 4px 10px 6px; border-bottom: 1px solid #e5e7eb; }
+.hfilters .chip { font-size: 11.5px; line-height: 18px; padding: 2px 8px; border-radius: 999px; border: 1px solid #e5e7eb; color: #6b7280; }
 .hbody { display: flex; height: 434px; }
 .hlist { flex: 1 1 52%; min-width: 0; overflow: hidden; padding: 4px 0; }
 .hrow { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 4px; height: 26px; }

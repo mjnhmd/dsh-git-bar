@@ -42,9 +42,12 @@ do:
 The conversation also gains a **Git history** view tab. The left half is the
 commit graph — one lane per line of history, each lane keeping its own colour,
 merge commits drawing the line back into the lane it merged into — followed by
-the commit list and a keyword filter. Pick a commit to read its author, time,
-full message and changed files; pick a file to read its unified diff inside that
-commit. The tab only reads: no ref, index or worktree is written.
+the commit list and a keyword filter, plus two dropdowns that narrow the list by
+branch and by author — both run in git, so they apply to the whole history rather
+than to the page already loaded. Picking a commit reads its author, time, full
+message and changed files; picking a file reads its unified diff inside that
+commit. Scrolling to the bottom loads older commits by itself; there is no
+"load more" button. The tab only reads: no ref, index or worktree is written.
 - nothing here silently scrolls away: a drag that selects text does not also open
   a popover.
 
@@ -144,8 +147,8 @@ additions, deletions }], dirty, truncated }`, capped at 500 files.
 `GET /dsh-git-bar/diff?sessionId=<id>&path=<repo-relative>&staged=0|1` — `{ path,
 staged, diff, truncated }`, capped at 200 000 characters.
 
-`GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300]` — `{ dir, commits, hasMore,
-truncated }`, where each commit is `{ hash, short, parents, author, email, when,
+`GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300][&branch=<ref>][&author=<text>]`
+— `{ dir, commits, hasMore, truncated, filters: { branch, author } }`, where each commit is `{ hash, short, parents, author, email, when,
 subject, refs: [{ name, kind }] }`. `kind` is `head`, `local`, `remote` or `tag`,
 and `name` is the short ref name (the same form `/branches` reports). 60 commits
 by default, 300 at most.

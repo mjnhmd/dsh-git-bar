@@ -39,8 +39,8 @@
         "zh": "Git 状态条"
       },
       "description": {
-        "en": "Shows the repository, branch, working-tree changes and a clickable short SHA right above the composer; click the branch to search, switch or create one, click the change count to open the diff pane, click the worktree marker to list every worktree and open a Session in one of them. The conversation also gains a Git history tab: a commit graph with one colour per lane, the commit list, commit details and the per-file diff inside each commit.",
-        "zh": "在输入框上方显示仓库、分支、改动数与可点击的短 SHA；点分支可搜索/切换/新建分支，点改动数打开右侧 diff 面板，点工作树标记可列出所有工作树并在其中新建会话。主对话区另有 Git 历史标签页：按 lane 着色的提交图谱、提交列表、提交详情，以及每个文件在这笔提交里的 diff。"
+        "en": "Shows the repository, branch, working-tree changes and a clickable short SHA right above the composer; click the branch to search, switch or create one, click the change count to open the diff pane, click the worktree marker to list every worktree and open a Session in one of them. The conversation also gains a Git history tab: a commit graph with one colour per lane, the commit list with branch and author filters, commit details and the per-file diff inside each commit; scrolling loads older commits.",
+        "zh": "在输入框上方显示仓库、分支、改动数与可点击的短 SHA；点分支可搜索/切换/新建分支，点改动数打开右侧 diff 面板，点工作树标记可列出所有工作树并在其中新建会话。主对话区另有 Git 历史标签页：按 lane 着色的提交图谱、可按分支与提交人筛选的提交列表、提交详情，以及每个文件在这笔提交里的 diff；滚到底部自动加载更早提交。"
       },
       "icon": "icons/git-bar.svg",
       "author": "mengjingnan",
