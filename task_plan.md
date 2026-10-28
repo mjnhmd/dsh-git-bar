@@ -107,3 +107,33 @@ GET /dsh-git-bar/log?sessionId=<id>[&dir=<abs>][&limit=1..300][&branch=<ref>][&a
   （`git log <branch> ...`，替代 `--all`）。ref 不存在时 git 非零退出 → 沿用现有失败形状，`reason: 'unknown-ref'`。
 - `author`：1..200 字符、无控制字符 → `--author=<text>`（git 按正则匹配姓名/邮箱）。
 - 响应原有字段不变，额外回显 `filters: { branch, author }`（未启用为 `null`），供客户端断言与 UI 回显。
+
+## 第三轮：筛选面板搜索 + 滚动 + 全量提交人候选（当前任务）
+
+用户（m00734）：「那个筛选，需要支持输入搜索，同时你现在的面板也需要支持滚动，因为提交人或者分支可能非常多」。
+
+现状缺口（实测代码，不是猜测）：
+1. `filterChip()` 的面板只有选项按钮，没有输入框，长列表只能靠肉眼找；
+2. `.menu` 虽然 `maxHeight: 240px; overflow: auto`，但整个面板一起滚，没有搜索框可固定；
+3. 提交人候选只从**已加载的提交**里累积（`log.commits` 派生），仓库历史深时，排在 100 页之后的作者根本出不来。
+
+### 目标与验收
+1. 打开分支 / 提交人面板，搜索框自动聚焦；键入子串即实时过滤（不区分大小写），无命中显示「没有匹配项」；
+2. 选项区独立滚动（`maxHeight` + `overflow-y: auto`），搜索框固定在顶部不随滚动；面板高度不超过视口；
+3. 提交人候选来自新路由 `/dsh-git-bar/authors`，覆盖整条历史（含尚未加载的提交），按提交数降序；
+   该路由失败时回退到已加载作者，不阻塞；
+4. `node test/host.test.mjs` 覆盖 `/authors`：去重计数、排序、上限截断、非仓库；
+   `node test/client.test.mjs` 覆盖面板搜索过滤、滚动样式、作者回退；
+   `node test/interaction.test.mjs` 覆盖「打开面板 → 输入 → 过滤后点选项 → 请求带 `branch` / `author`」；
+5. README 中英 + `docs/market/index.json` + 预览图同步，`package.json` 升 `0.5.0`。
+
+### 新路由契约（Host 侧）
+```
+GET /dsh-git-bar/authors?sessionId=<id>[&dir=<abs>]
+→ 200 { dir, authors: [{ name, email, count }], truncated }
+```
+- 来源：`git log --all --format=%an%x1f%ae`（不按分支过滤，候选要覆盖整条历史）；
+- 按 `name + email` 聚合计数，排序 `count` 降序、同数量按 `name` 升序；
+- 上限 500 条，超出时 `truncated: true`；
+- `dir` 只在 Session store 查不到时兜底，且必须是绝对路径；非仓库（有 `.git` 但 `git log` 失败）→ `{ authors: [], truncated: false }`；
+- 走和其他路由相同的 `requestRejection` 准入。

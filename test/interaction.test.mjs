@@ -214,11 +214,27 @@ const commitReply = {
   ],
 }
 const commitDiffReply = { path: 'src/a.js', truncated: false, diff: '@@ -1 +1 @@\n-old line\n+new line\n' }
+// 提交人候选由 /authors 提供：Zoe 只存在于尚未加载的历史里，用来证明候选不依赖当前页。
+let authorsMode = 'ok'
+const authorsReply = {
+  dir: '/repo-link',
+  truncated: false,
+  authors: [
+    { name: 'Zoe', email: 'zoe@example.com', count: 9 },
+    { name: 'Ada', email: 'ada@example.com', count: 3 },
+    { name: 'Bob', email: 'bob@example.com', count: 1 },
+  ],
+}
 globalThis.fetch = async (url) => {
   const text = String(url)
   fetches.push(text)
   if (text.startsWith('/dsh-git-bar/worktrees')) return { ok: true, json: async () => worktreeReply }
   if (text.startsWith('/dsh-git-bar/branches')) return { ok: true, json: async () => branchReply }
+  if (text.startsWith('/dsh-git-bar/authors')) {
+    return authorsMode === 'ok'
+      ? { ok: true, json: async () => authorsReply }
+      : { ok: false, status: 404, json: async () => ({}) }
+  }
   if (text.startsWith('/dsh-git-bar/commit-diff')) return { ok: true, json: async () => commitDiffReply }
   if (text.startsWith('/dsh-git-bar/commit')) return { ok: true, json: async () => commitReply }
   if (text.startsWith('/dsh-git-bar/log')) return { ok: true, json: async () => logReplyFor(text) }
@@ -426,15 +442,17 @@ assert.ok(!lastLog.includes('author='), `reset drops author: ${lastLog}`)
 assert.equal(findAll(historyTree, (node) => node.props['data-history-reset'] !== undefined).length, 0)
 console.log('11 reset OK')
 
-// 12. 提交人下拉：候选来自已加载的提交，选中后带 author 参数重拉
+// 12. 提交人下拉：候选来自 /authors（整条历史，含这一页没加载的 Zoe），按提交数降序
 const authorChip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'author')[0]
 authorChip.props.onClick()
+await flush()
 historyTree = runtime.rerender(historyElement)
+assert.ok(fetches.some((url) => url.startsWith('/dsh-git-bar/authors')), 'full author list fetched once')
 const authorOptions = findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string')
 assert.deepEqual(
   authorOptions.map((option) => option.props['data-history-option']),
-  ['', 'Ada', 'Bob'],
-  'authors collected from the loaded commits',
+  ['', 'Zoe', 'Ada', 'Bob'],
+  'host author list wins over the loaded page, most commits first',
 )
 authorOptions.find((option) => option.props['data-history-option'] === 'Bob').props.onClick()
 await flush()
@@ -458,5 +476,64 @@ assert.ok(pagedLog.includes('limit=120'), `scroll near the bottom asks for the n
 const manualMore = findAll(historyTree, (node) => node.type === 'button' && textOf(node).join('') === 'T:history.more')
 assert.equal(manualMore.length, 0, 'no manual load-more button any more')
 console.log('13 infinite scroll OK:', pagedLog.slice(pagedLog.indexOf('?')))
+
+// 14. 下拉面板：搜索框固定在顶部、选项区自己滚动，键入就过滤
+const openBranchChip = () => {
+  const chip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'branch')[0]
+  chip.props.onClick()
+  const tree = runtime.rerender(historyElement)
+  historyTree = tree
+  return tree
+}
+openBranchChip()
+const menuList = findAll(historyTree, (node) => node.props['data-history-menu-list'] === 'branch')[0]
+assert.ok(menuList !== undefined, 'panel renders a dedicated option list')
+assert.equal(menuList.props.style.overflowY, 'auto', 'option list scrolls on its own')
+assert.equal(menuList.props.style.maxHeight, '240px', 'option list is height-capped')
+const menuSearch = findAll(historyTree, (node) => node.props['data-history-menu-search'] === 'branch')[0]
+assert.ok(menuSearch !== undefined, 'panel has a search box')
+assert.equal(menuSearch.props.autoFocus, true, 'search box takes focus when the panel opens')
+assert.equal(menuSearch.props.placeholder, 'history.searchBranch', 'placeholder names what is being searched')
+const searchBox = () => findAll(historyTree, (node) => node.props['data-history-menu-search'] === 'branch')[0]
+searchBox().props.onChange({ target: { value: 'MAI' } })
+historyTree = runtime.rerender(historyElement)
+const narrowed = findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string')
+assert.deepEqual(
+  narrowed.map((option) => option.props['data-history-option']),
+  ['main'],
+  'typing narrows the options case-insensitively',
+)
+searchBox().props.onChange({ target: { value: 'zzz' } })
+historyTree = runtime.rerender(historyElement)
+assert.equal(
+  findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string').length,
+  0,
+  'no option survives a miss',
+)
+assert.ok(textOf(historyTree).join(' ').includes('history.noOption'), 'a miss says so instead of an empty panel')
+searchBox().props.onKeyDown({ key: 'Escape' })
+historyTree = runtime.rerender(historyElement)
+assert.equal(
+  findAll(historyTree, (node) => node.props['data-history-menu-list'] !== undefined).length,
+  0,
+  'Escape closes the panel',
+)
+console.log('14 panel search + scroll OK')
+
+// 15. /authors 拉不到时退回已加载提交里的作者，筛选照常可用
+authorsMode = 'fail'
+historyTree = runtime.mount(historyElement)
+await flush()
+historyTree = runtime.rerender(historyElement)
+findAll(historyTree, (node) => node.props['data-history-chip'] === 'author')[0].props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+const fallbackOptions = findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string')
+assert.deepEqual(
+  fallbackOptions.map((option) => option.props['data-history-option']),
+  ['', 'Ada', 'Bob'],
+  'a failed author list falls back to the loaded commits',
+)
+console.log('15 author fallback OK:', fallbackOptions.length, 'options')
 
 console.log('\nALL INTERACTION TESTS PASSED')

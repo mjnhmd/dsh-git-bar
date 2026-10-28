@@ -46,6 +46,8 @@ window.__ModuleLoader__.load({
     const COMMIT_ROUTE = '/dsh-git-bar/commit'
     /** Host route rendering one file's change inside one commit. */
     const COMMIT_DIFF_ROUTE = '/dsh-git-bar/commit-diff'
+    /** Host route listing every author in the history, with a commit count. */
+    const AUTHORS_ROUTE = '/dsh-git-bar/authors'
     /** Conversation-view tab id owned by this plugin. */
     const HISTORY_VIEW_ID = 'git-bar-history'
     /** Commits asked for by one page, and added by every "load more". */
@@ -124,6 +126,9 @@ window.__ModuleLoader__.load({
       'history.reset': '重置筛选',
       'history.filterBranch': '按分支筛选',
       'history.filterAuthor': '按提交人筛选',
+      'history.searchBranch': '搜索分支…',
+      'history.searchAuthor': '搜索提交人…',
+      'history.noOption': '没有匹配项',
       'history.refresh': '刷新',
       'history.loading': '正在读取提交历史…',
       'history.failed': '读取提交历史失败',
@@ -201,6 +206,9 @@ window.__ModuleLoader__.load({
       'history.reset': 'Clear filters',
       'history.filterBranch': 'Filter by branch',
       'history.filterAuthor': 'Filter by author',
+      'history.searchBranch': 'Search branches…',
+      'history.searchAuthor': 'Search authors…',
+      'history.noOption': 'No match',
       'history.refresh': 'Refresh',
       'history.loading': 'Reading history…',
       'history.failed': 'Could not read history',
@@ -1788,17 +1796,48 @@ window.__ModuleLoader__.load({
         top: 'calc(100% + 4px)',
         left: 0,
         zIndex: 20,
-        minWidth: '160px',
+        minWidth: '200px',
         maxWidth: '320px',
-        maxHeight: '240px',
-        overflow: 'auto',
-        padding: '4px',
+        maxHeight: 'calc(100vh - 96px)',
+        overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         background: 'var(--dsw-alias-bg-layer-1, #fff)',
         border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         borderRadius: '8px',
         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+      },
+      menuSearch: {
+        flex: 'none',
+        padding: '5px',
+        borderBottom: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
+      },
+      menuSearchInput: {
+        width: '100%',
+        boxSizing: 'border-box',
+        padding: '3px 6px',
+        font: 'inherit',
+        fontSize: '12px',
+        color: 'var(--dsw-alias-label-primary, inherit)',
+        background: 'var(--dsw-alias-bg-layer-2, #f5f6f8)',
+        border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
+        borderRadius: '6px',
+        outline: 'none',
+      },
+      menuList: {
+        flex: '1 1 auto',
+        minHeight: 0,
+        maxHeight: '240px',
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '4px',
+      },
+      menuHint: {
+        padding: '6px 8px',
+        fontSize: '11.5px',
+        color: 'var(--dsw-alias-label-tertiary, #9ca3af)',
       },
       menuItem: {
         padding: '4px 8px',
@@ -2230,8 +2269,11 @@ window.__ModuleLoader__.load({
       const [pickedPath, setPickedPath] = React.useState('')
       const [diff, setDiff] = React.useState({ phase: 'idle', text: '', truncated: false })
       const [menu, setMenu] = React.useState('')
+      const [menuQuery, setMenuQuery] = React.useState('')
       const [branches, setBranches] = React.useState([])
       const [authors, setAuthors] = React.useState([])
+      const [authorRows, setAuthorRows] = React.useState([])
+      const [authorPhase, setAuthorPhase] = React.useState('idle')
 
       const queryFor = (extra) => {
         const params = new URLSearchParams({ sessionId })
@@ -2319,6 +2361,35 @@ window.__ModuleLoader__.load({
           live = false
         }
       }, [menu, branches.length])
+
+      // 提交人候选取整条历史：第一次打开提交人下拉时向 Host 要一次全量作者。
+      // 拉不到（旧版 Host、非仓库）就退回从已加载提交里累积的名单，不阻塞筛选。
+      React.useEffect(() => {
+        if (menu !== 'author' || authorPhase !== 'idle') return
+        let live = true
+        setAuthorPhase('loading')
+        getJson(AUTHORS_ROUTE, {})
+          .then((body) => {
+            if (!live) return
+            setAuthorRows(
+              (Array.isArray(body.authors) ? body.authors : [])
+                .map((row) => ({
+                  name: String(row?.name ?? '').trim(),
+                  count: Number(row?.count ?? 0),
+                }))
+                .filter((row) => row.name !== ''),
+            )
+            setAuthorPhase('ready')
+          })
+          .catch(() => {
+            if (!live) return
+            setAuthorRows([])
+            setAuthorPhase('failed')
+          })
+        return () => {
+          live = false
+        }
+      }, [menu, authorPhase])
 
       // 提交人候选从已加载的提交里累积，翻页后仍记得前面出现过的作者。
       React.useEffect(() => {
@@ -2444,8 +2515,22 @@ window.__ModuleLoader__.load({
           author: kind === 'author' ? String(value) : current.author,
         }))
 
-      const filterChip = (kind, label, allLabel, options) =>
-        h(
+      const closeMenu = () => {
+        setMenu('')
+        setMenuQuery('')
+      }
+
+      const filterChip = (kind, label, allLabel, options) => {
+        // 面板里带搜索框：分支和提交人都可能成百上千，只能打字找。
+        const needle = menuQuery.trim().toLowerCase()
+        const items = [{ value: '', label: allLabel }].concat(
+          options.map((option) => ({ value: option, label: option })),
+        )
+        const shown =
+          needle === ''
+            ? items
+            : items.filter((item) => item.label.toLowerCase().includes(needle))
+        return h(
           'div',
           { style: historyStyles.chipWrap },
           h(
@@ -2457,7 +2542,13 @@ window.__ModuleLoader__.load({
               'aria-haspopup': 'listbox',
               'aria-expanded': menu === kind ? 'true' : 'false',
               'data-history-chip': kind,
-              onClick: () => setMenu(menu === kind ? '' : kind),
+              onClick: () => {
+                if (menu === kind) closeMenu()
+                else {
+                  setMenu(kind)
+                  setMenuQuery('')
+                }
+              },
             },
             page[kind] === '' ? allLabel : page[kind],
           ),
@@ -2465,40 +2556,67 @@ window.__ModuleLoader__.load({
             ? null
             : h(
                 'div',
-                { style: historyStyles.menu, role: 'listbox' },
-                [{ value: '', label: allLabel }]
-                  .concat(options.map((option) => ({ value: option, label: option })))
-                  .map((item) =>
-                    h(
-                      'button',
-                      {
-                        key: `${kind}:${item.value}`,
-                        type: 'button',
-                        role: 'option',
-                        'aria-selected': page[kind] === item.value ? 'true' : 'false',
-                        'data-history-option': item.value,
-                        style:
-                          page[kind] === item.value
-                            ? { ...historyStyles.menuItem, ...historyStyles.menuItemActive }
-                            : historyStyles.menuItem,
-                        title: item.label,
-                        onClick: () => {
-                          applyFilter(kind, item.value)
-                          setMenu('')
-                        },
-                      },
-                      item.label,
-                    ),
-                  ),
+                { style: historyStyles.menu, role: 'listbox', 'data-history-menu': kind },
+                h(
+                  'div',
+                  { style: historyStyles.menuSearch },
+                  h('input', {
+                    type: 'search',
+                    value: menuQuery,
+                    placeholder: kind === 'branch' ? t('history.searchBranch') : t('history.searchAuthor'),
+                    'aria-label': label,
+                    style: historyStyles.menuSearchInput,
+                    'data-history-menu-search': kind,
+                    autoFocus: true,
+                    onChange: (event) => setMenuQuery(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Escape') closeMenu()
+                    },
+                  }),
+                ),
+                h(
+                  'div',
+                  { style: historyStyles.menuList, 'data-history-menu-list': kind },
+                  shown.length === 0
+                    ? h('div', { style: historyStyles.menuHint }, t('history.noOption'))
+                    : shown.map((item) =>
+                        h(
+                          'button',
+                          {
+                            key: `${kind}:${item.value}`,
+                            type: 'button',
+                            role: 'option',
+                            'aria-selected': page[kind] === item.value ? 'true' : 'false',
+                            'data-history-option': item.value,
+                            style:
+                              page[kind] === item.value
+                                ? { ...historyStyles.menuItem, ...historyStyles.menuItemActive }
+                                : historyStyles.menuItem,
+                            title: item.label,
+                            onClick: () => {
+                              applyFilter(kind, item.value)
+                              closeMenu()
+                            },
+                          },
+                          item.label,
+                        ),
+                      ),
+                ),
               ),
         )
+      }
 
       const hasFilters = page.branch !== '' || page.author !== ''
+      // Host 的全量作者优先；同名的不同邮箱只留一条，避免下拉里出现重复项。
+      const authorOptions =
+        authorRows.length > 0
+          ? Array.from(new Set(authorRows.map((row) => row.name)))
+          : authors
       const filterRow = h(
         'div',
         { style: historyStyles.filterRow, 'data-history-filters': '' },
         filterChip('branch', t('history.filterBranch'), t('history.allBranches'), branches),
-        filterChip('author', t('history.filterAuthor'), t('history.allAuthors'), authors),
+        filterChip('author', t('history.filterAuthor'), t('history.allAuthors'), authorOptions),
         hasFilters
           ? h(
               'button',

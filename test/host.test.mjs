@@ -48,7 +48,7 @@ const ctx = {
 apply(ctx)
 assert.equal(name, 'dsh-git-bar')
 assert.deepEqual(inject, ['webServer'])
-assert.equal(routes.length, 10)
+assert.equal(routes.length, 11)
 assert.ok(routes.every((route) => route.kind === 'exact'))
 assert.deepEqual(routes.map((route) => route.path), [
   '/dsh-git-bar/info',
@@ -61,6 +61,7 @@ assert.deepEqual(routes.map((route) => route.path), [
   '/dsh-git-bar/log',
   '/dsh-git-bar/commit',
   '/dsh-git-bar/commit-diff',
+  '/dsh-git-bar/authors',
 ])
 assert.deepEqual(effects, [
   'git-bar: GET /dsh-git-bar/info',
@@ -73,6 +74,7 @@ assert.deepEqual(effects, [
   'git-bar: GET /dsh-git-bar/log',
   'git-bar: GET /dsh-git-bar/commit',
   'git-bar: GET /dsh-git-bar/commit-diff',
+  'git-bar: GET /dsh-git-bar/authors',
 ])
 const handlers = new Map(routes.map((route) => [route.path, route.handler]))
 
@@ -888,6 +890,141 @@ assert.deepEqual(r.json, {
   filters: { branch: 'main', author: 't' },
 })
 console.log('53 log filters echo OK')
+
+// 54. authors aggregates the whole history per name+email, most prolific first
+const people = makeRepo(join(base, 'people'), { commit: false })
+writeFileSync(join(people, 'p.txt'), 'p\n')
+GIT(people, 'add', 'p.txt')
+const commitAs = (who, email, message) =>
+  GIT(people, '-c', `user.name=${who}`, '-c', `user.email=${email}`, 'commit', '--allow-empty', '-q', '-m', message)
+commitAs('alice', 'alice@example.com', 'a1')
+commitAs('alice', 'alice@example.com', 'a2')
+commitAs('bob', 'bob@example.com', 'b1')
+commitAs('Carol', 'carol@example.com', 'c1')
+commitAs('Carol', 'carol@example.com', 'c2')
+commitAs('alice', 'alice@example.com', 'a3')
+// the same name under another address is a separate candidate: the filter matches the ident
+commitAs('alice', 'alice@work.example', 'a4')
+// and a branch that is not checked out still contributes: candidates cover every ref
+GIT(people, 'checkout', '-q', '-b', 'side')
+commitAs('dave', 'dave@example.com', 'd1')
+GIT(people, 'checkout', '-q', 'main')
+const expectedAuthors = [
+  { name: 'alice', email: 'alice@example.com', count: 3 },
+  { name: 'Carol', email: 'carol@example.com', count: 2 },
+  { name: 'alice', email: 'alice@work.example', count: 1 },
+  { name: 'bob', email: 'bob@example.com', count: 1 },
+  { name: 'dave', email: 'dave@example.com', count: 1 },
+].sort((left, right) => right.count - left.count || left.name.localeCompare(right.name) || left.email.localeCompare(right.email))
+r = await call(`/dsh-git-bar/authors?dir=${dirParam(people)}`)
+assert.equal(r.status, 200)
+assert.equal(r.json.dir, people)
+assert.equal(r.json.truncated, false)
+assert.deepEqual(r.json.authors, expectedAuthors)
+assert.deepEqual(
+  r.json.authors.map((author) => author.count),
+  [3, 2, 1, 1, 1],
+)
+assert.ok(
+  r.json.authors.some((author) => author.name === 'dave'),
+  'an author who only commits on an unchecked-out branch is still a candidate',
+)
+console.log('54 authors aggregation OK', JSON.stringify(r.json.authors))
+
+// 55. more than 500 candidates are cut to 500 and flagged, keeping the sorted head
+// One `git fast-import` stream: 501 single-commit authors would otherwise cost
+// seconds of process spawns inside a unit test.
+const crowd = makeRepo(join(base, 'crowd'), { commit: false })
+const imported = []
+for (let index = 0; index < 501; index += 1) {
+  const ident = `Person${index} <person${index}@example.com> 1700000000 +0000`
+  const message = `c${index}`
+  imported.push(
+    'commit refs/heads/main',
+    `mark :${index + 1}`,
+    `author ${ident}`,
+    `committer ${ident}`,
+    `data ${Buffer.byteLength(message)}`,
+    message,
+  )
+  if (index > 0) imported.push(`from :${index}`)
+  imported.push('')
+}
+execFileSync('git', ['-C', crowd, 'fast-import', '--quiet'], {
+  input: `${imported.join('\n')}\n`,
+  stdio: ['pipe', 'pipe', 'pipe'],
+})
+r = await call(`/dsh-git-bar/authors?dir=${dirParam(crowd)}`)
+assert.equal(r.status, 200)
+assert.equal(r.json.authors.length, 500)
+assert.equal(r.json.truncated, true)
+assert.equal(r.json.authors.every((author) => author.count === 1), true)
+const expectedCapped = Array.from({ length: 501 }, (_, index) => `Person${index}`).sort((left, right) => left.localeCompare(right))
+assert.deepEqual(r.json.authors.map((author) => author.name), expectedCapped.slice(0, 500))
+console.log('55 authors cap OK', r.json.authors.length, r.json.truncated)
+
+// 56. authors outside a repository is an empty list, not an error
+r = await call(`/dsh-git-bar/authors?dir=${dirParam(plain)}`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json, { dir: plain, authors: [], truncated: false })
+console.log('56 authors not-a-repository OK')
+
+// 57. authors sits behind the same auth gate and method guard as every read route
+rejection = 401
+r = await call(`/dsh-git-bar/authors?dir=${dirParam(people)}`)
+assert.equal(r.status, 401)
+assert.equal(r.body, '')
+rejection = undefined
+r = await call(`/dsh-git-bar/authors?dir=${dirParam(people)}`, { method: 'POST' })
+assert.equal(r.status, 405)
+assert.equal(r.headers.allow, 'GET')
+console.log('57 authors guards OK')
+
+// 58. authors resolves its directory the same way: Session store first, absolute hint only
+sessions = { 'session-people': { header: { cwd: people } } }
+r = await call('/dsh-git-bar/authors?sessionId=session-people&dir=/definitely/not/this')
+assert.equal(r.status, 200)
+assert.equal(r.json.dir, people)
+assert.equal(r.json.authors.length, 5)
+sessions = {}
+r = await call('/dsh-git-bar/authors?dir=relative/path')
+assert.equal(r.status, 400)
+assert.deepEqual(r.json, { error: 'no-directory' })
+r = await call('/dsh-git-bar/authors')
+assert.equal(r.status, 400)
+assert.deepEqual(r.json, { error: 'no-directory' })
+console.log('58 authors directory OK')
+
+// 59. a history too long for the git buffer is reported as truncated, not as a failure
+// One author over ~6000 commits: the aggregated list is one row, so `truncated`
+// here can only come from the stdout buffer, not from the 500-row cap.
+const deep = makeRepo(join(base, 'deep'), { commit: false })
+const streamed = []
+for (let index = 0; index < 6000; index += 1) {
+  const ident = 'Some One <someone.with.a.long.address@example.com> 1700000000 +0000'
+  const message = `d${index}`
+  streamed.push(
+    'commit refs/heads/main',
+    `mark :${index + 1}`,
+    `author ${ident}`,
+    `committer ${ident}`,
+    `data ${Buffer.byteLength(message)}`,
+    message,
+  )
+  if (index > 0) streamed.push(`from :${index}`)
+  streamed.push('')
+}
+execFileSync('git', ['-C', deep, 'fast-import', '--quiet'], {
+  input: `${streamed.join('\n')}\n`,
+  stdio: ['pipe', 'pipe', 'pipe'],
+})
+r = await call(`/dsh-git-bar/authors?dir=${dirParam(deep)}`)
+assert.equal(r.status, 200)
+assert.equal(r.json.authors.length, 1)
+assert.equal(r.json.authors[0].name, 'Some One')
+assert.equal(r.json.truncated, true)
+assert.ok(r.json.authors[0].count > 5000, `expected a large partial count, got ${r.json.authors[0].count}`)
+console.log('59 authors buffer truncation OK', r.json.authors[0].count, r.json.truncated)
 
 rmSync(base, { recursive: true, force: true })
 console.log('\nALL HOST TESTS PASSED')

@@ -44,7 +44,10 @@ commit graph — one lane per line of history, each lane keeping its own colour,
 merge commits drawing the line back into the lane it merged into — followed by
 the commit list and a keyword filter, plus two dropdowns that narrow the list by
 branch and by author — both run in git, so they apply to the whole history rather
-than to the page already loaded. Picking a commit reads its author, time, full
+than to the page already loaded. Each dropdown has its own search box and its
+options scroll on their own, so a repository with hundreds of branches is still
+usable; the author list comes from `/authors`, i.e. from every commit in the
+repository, not just the page already loaded. Picking a commit reads its author, time, full
 message and changed files; picking a file reads its unified diff inside that
 commit. Scrolling to the bottom loads older commits by itself; there is no
 "load more" button. The tab only reads: no ref, index or worktree is written.
@@ -146,6 +149,11 @@ additions, deletions }], dirty, truncated }`, capped at 500 files.
 
 `GET /dsh-git-bar/diff?sessionId=<id>&path=<repo-relative>&staged=0|1` — `{ path,
 staged, diff, truncated }`, capped at 200 000 characters.
+
+`GET /dsh-git-bar/authors?sessionId=<id>` — `{ dir, authors: [{ name, email,
+count }], truncated }`, aggregated over `git log --all`, most commits first, tied
+names alphabetical, capped at 500 rows. It exists so the author filter can offer
+people who only appear deeper in the history than the current page.
 
 `GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300][&branch=<ref>][&author=<text>]`
 — `{ dir, commits, hasMore, truncated, filters: { branch, author } }`, where each commit is `{ hash, short, parents, author, email, when,

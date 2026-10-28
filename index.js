@@ -1,7 +1,7 @@
 /**
  * dsh-git-bar — Host half.
  *
- * Ten JSON routes over the platform `git` executable:
+ * Eleven JSON routes over the platform `git` executable:
  *
  *   GET  /dsh-git-bar/info?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/branches?sessionId=<id>[&dir=<absolute path>]
@@ -11,16 +11,19 @@
  *   GET  /dsh-git-bar/log?sessionId=<id>[&dir=<absolute path>][&limit=<1..300>][&branch=<ref>][&author=<text>]
  *   GET  /dsh-git-bar/commit?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>
  *   GET  /dsh-git-bar/commit-diff?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>&path=<relative>
+ *   GET  /dsh-git-bar/authors?sessionId=<id>[&dir=<absolute path>]
  *   POST /dsh-git-bar/branches/checkout   {"sessionId","dir","branch"}
  *   POST /dsh-git-bar/branches/create     {"sessionId","dir","name","from"?}
  *
  * The routes report the repository a Session runs in, its branches, its changed
  * files, and a single file's unified diff; the three history routes add the
  * commit graph (`log`), one commit's file list (`commit`) and one file's diff
- * inside that commit (`commit-diff`), all read-only. The two POSTs switch the
- * working tree to another branch. Only the POSTs write, and only by running plain
- * `git checkout` with an argument array: no shell, and a branch name that git
- * itself refuses (`git check-ref-format --branch`) never reaches the checkout.
+ * inside that commit (`commit-diff`), and `authors` lists every commit author in
+ * the whole history so the graph can be filtered by one, all read-only. The two
+ * POSTs switch the working tree to another branch. Only the POSTs write, and
+ * only by running plain `git checkout` with an argument array: no shell, and a
+ * branch name that git itself refuses (`git check-ref-format --branch`) never
+ * reaches the checkout.
  *
  * No route runs git for a directory the client invented: the directory is
  * resolved from the Session store first, and a caller-supplied `dir` is only a
@@ -77,6 +80,9 @@ const ROUTE_COMMIT = '/dsh-git-bar/commit'
 /** Route returning one file's diff inside one commit. */
 const ROUTE_COMMIT_DIFF = '/dsh-git-bar/commit-diff'
 
+/** Route listing every commit author in the history. */
+const ROUTE_AUTHORS = '/dsh-git-bar/authors'
+
 /** Per-call git timeout. A status read on a large repository stays well below it. */
 const GIT_TIMEOUT_MS = 4000
 
@@ -114,6 +120,9 @@ const LOG_FORMAT = '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x1e'
 /** `git show` record: the log columns, with the message body in place of the decorations. */
 const COMMIT_FORMAT = '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e'
 
+/** `/authors` record: one author name and email per commit. */
+const AUTHOR_FORMAT = '%an%x1f%ae'
+
 /** The unit separator `LOG_FORMAT` and `COMMIT_FORMAT` put between columns. */
 const FIELD_SEPARATOR = '\u001f'
 
@@ -128,6 +137,9 @@ const MAX_LOG_LIMIT = 300
 
 /** Largest number of files described for one commit; the count still reports them all. */
 const MAX_COMMIT_FILES = 500
+
+/** Largest number of author candidates described; a longer list is cut and flagged. */
+const MAX_AUTHORS = 500
 
 /** The only shape a revision may have: 4..40 hex digits, never an option or a path. */
 const HASH_PATTERN = /^[0-9a-f]{4,40}$/i
@@ -1056,6 +1068,68 @@ async function readLog(dir, limit, filters) {
 }
 
 /**
+ * Count commits per author across one `AUTHOR_FORMAT` listing.
+ *
+ * One line per commit, one candidate per name+email pair — a person who
+ * committed under two addresses is two candidates, because the log filter
+ * matches the ident, not the person. Sorting is by how much of the history
+ * someone wrote, then by name so the order is stable across calls; the email
+ * only breaks a tie between two candidates that share a name.
+ *
+ * @param text - `git log --format=%an%x1f%ae` output.
+ * @returns `{ name, email, count }` per distinct author, most commits first.
+ */
+function parseAuthors(text) {
+  const counts = new Map()
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const separator = line.indexOf(FIELD_SEPARATOR)
+    const name = separator === -1 ? line : line.slice(0, separator)
+    const email = separator === -1 ? '' : line.slice(separator + 1)
+    const key = `${name}${FIELD_SEPARATOR}${email}`
+    const counted = counts.get(key)
+    if (counted === undefined) counts.set(key, { name, email, count: 1 })
+    else counted.count += 1
+  }
+  return [...counts.values()].sort(compareAuthors)
+}
+
+/**
+ * Order author candidates the way the history filter offers them.
+ * @param left - first candidate.
+ * @param right - second candidate.
+ * @returns the sort order: most commits first, then name, then email.
+ */
+function compareAuthors(left, right) {
+  return right.count - left.count || left.name.localeCompare(right.name) || left.email.localeCompare(right.email)
+}
+
+/**
+ * Read every commit author in the repository's history.
+ *
+ * The history view filters commits by author, and a Client that only ever sees
+ * one page of `/log` could only offer the authors who happen to be on that page
+ * — a deep history would hide everyone older. So this walks the whole graph
+ * once (`--all`, no branch filter) and aggregates here, which keeps the reply to
+ * a few hundred rows instead of every commit.
+ *
+ * A directory that is not a repository degrades to an empty candidate list, the
+ * same way the other read routes do.
+ *
+ * @param dir - absolute directory, whether or not it is a repository.
+ * @returns up to `MAX_AUTHORS` candidates and whether any were cut.
+ */
+async function readAuthors(dir) {
+  const result = await runGit(dir, ['log', '--all', `--format=${AUTHOR_FORMAT}`])
+  if (!result.ok && !result.overflow) return { authors: [], truncated: false }
+  // A buffer that overflowed ends mid-record, and half an ident would surface in
+  // the filter as an author with a cut-off email; keep only whole lines.
+  const text = result.overflow ? result.out.slice(0, result.out.lastIndexOf('\n') + 1) : result.out
+  const authors = parseAuthors(text)
+  return { authors: authors.slice(0, MAX_AUTHORS), truncated: result.overflow || authors.length > MAX_AUTHORS }
+}
+
+/**
  * The post-change path of a `--numstat` path column.
  *
  * A rename prints `old => new`, or `pre{a => b}post` when the two paths share a
@@ -1262,7 +1336,7 @@ async function servePost(ctx, req, res, slug, run) {
 }
 
 /**
- * Mount the ten routes.
+ * Mount the eleven routes.
  * @param ctx - plugin context; `webServer` arrives through `inject`.
  */
 export function apply(ctx) {
@@ -1463,5 +1537,19 @@ export function apply(ctx) {
           }),
       }),
     `git-bar: GET ${ROUTE_COMMIT_DIFF}`,
+  )
+
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTE_AUTHORS,
+        handler: (req, res) =>
+          serveGet(ctx, req, res, 'authors-failed', async (dir) => ({
+            status: 200,
+            body: { dir, ...(await readAuthors(dir)) },
+          })),
+      }),
+    `git-bar: GET ${ROUTE_AUTHORS}`,
   )
 }
