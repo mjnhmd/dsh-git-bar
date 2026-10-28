@@ -48,7 +48,7 @@ const ctx = {
 apply(ctx)
 assert.equal(name, 'dsh-git-bar')
 assert.deepEqual(inject, ['webServer'])
-assert.equal(routes.length, 7)
+assert.equal(routes.length, 10)
 assert.ok(routes.every((route) => route.kind === 'exact'))
 assert.deepEqual(routes.map((route) => route.path), [
   '/dsh-git-bar/info',
@@ -58,6 +58,9 @@ assert.deepEqual(routes.map((route) => route.path), [
   '/dsh-git-bar/diff',
   '/dsh-git-bar/branches/checkout',
   '/dsh-git-bar/branches/create',
+  '/dsh-git-bar/log',
+  '/dsh-git-bar/commit',
+  '/dsh-git-bar/commit-diff',
 ])
 assert.deepEqual(effects, [
   'git-bar: GET /dsh-git-bar/info',
@@ -67,6 +70,9 @@ assert.deepEqual(effects, [
   'git-bar: GET /dsh-git-bar/diff',
   'git-bar: POST /dsh-git-bar/branches/checkout',
   'git-bar: POST /dsh-git-bar/branches/create',
+  'git-bar: GET /dsh-git-bar/log',
+  'git-bar: GET /dsh-git-bar/commit',
+  'git-bar: GET /dsh-git-bar/commit-diff',
 ])
 const handlers = new Map(routes.map((route) => [route.path, route.handler]))
 
@@ -573,6 +579,193 @@ r = await call(`/dsh-git-bar/info?dir=${dirParam(hosted)}`)
 assert.equal(r.json.repository.remote, null)
 assert.equal(r.json.repository.commitUrl, null)
 console.log('39 unlinked remotes OK')
+
+// ---------------------------------------------------------------------------
+// git history: log, commit, commit-diff
+// ---------------------------------------------------------------------------
+
+// 40. log lists every commit newest first, and the branch HEAD sits on carries a head badge
+const history = makeRepo(join(base, 'history'))
+writeFileSync(join(history, 'a.txt'), 'one\ntwo\n')
+GIT(history, ...IDENTITY, 'commit', '-q', '-am', 'second')
+const historySecond = GIT(history, 'rev-parse', 'HEAD').trim()
+const historyFirst = GIT(history, 'rev-parse', 'HEAD~1').trim()
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}`)
+assert.equal(r.status, 200)
+assert.equal(r.json.dir, history)
+assert.equal(r.json.commits.length, 2)
+assert.equal(r.json.commits[0].hash, historySecond)
+assert.equal(r.json.commits[1].hash, historyFirst)
+assert.equal(r.json.commits[0].subject, 'second')
+assert.equal(r.json.commits[0].author, 't')
+assert.equal(r.json.commits[0].email, 't@t')
+assert.match(r.json.commits[0].when, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
+assert.ok(historySecond.startsWith(r.json.commits[0].short))
+assert.deepEqual(r.json.commits[0].parents, [historyFirst])
+assert.deepEqual(r.json.commits[1].parents, [])
+assert.deepEqual(r.json.commits[1].refs, [])
+const mainRef = r.json.commits[0].refs.find((ref) => ref.name === 'main')
+assert.ok(mainRef !== undefined, 'main should hold a badge on the HEAD commit')
+assert.ok(mainRef.kind === 'head' || mainRef.kind === 'local')
+assert.equal(r.json.hasMore, false)
+assert.equal(r.json.truncated, false)
+console.log('40 log OK', r.json.commits.map((commit) => commit.subject).join(' | '), JSON.stringify(r.json.commits[0].refs))
+
+// 41. --all reaches a branch that is not checked out, and limit=1 reports a further page
+GIT(history, 'checkout', '-q', '-b', 'feature')
+writeFileSync(join(history, 'f.txt'), 'f\n')
+GIT(history, 'add', 'f.txt')
+GIT(history, ...IDENTITY, 'commit', '-q', '-m', 'feature work')
+const historyFeature = GIT(history, 'rev-parse', 'HEAD').trim()
+GIT(history, 'checkout', '-q', 'main')
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}`)
+assert.equal(r.status, 200)
+assert.deepEqual(
+  r.json.commits.map((commit) => commit.subject).sort(),
+  ['feature work', 'first', 'second'],
+)
+const featureRow = r.json.commits.find((commit) => commit.hash === historyFeature)
+assert.deepEqual(featureRow.refs, [{ name: 'feature', kind: 'local' }])
+assert.equal(r.json.hasMore, false)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}&limit=1`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits.length, 1)
+assert.equal(r.json.hasMore, true)
+console.log('41 log --all + hasMore OK', featureRow.subject)
+
+// 42. a bad or out-of-range limit is clamped, never refused
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}&limit=0`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits.length, 1)
+assert.equal(r.json.hasMore, true)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}&limit=-5`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits.length, 1)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}&limit=99999`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits.length, 3)
+assert.equal(r.json.hasMore, false)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}&limit=abc&hash=zz&nonsense=1`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits.length, 3)
+console.log('42 limit clamping OK')
+
+// 43. log outside a repository degrades to an empty page
+r = await call(`/dsh-git-bar/log?dir=${dirParam(plain)}`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json, { dir: plain, commits: [], hasMore: false, truncated: false, reason: 'not-a-repository' })
+console.log('43 log not-a-repository OK')
+
+// 44. commit lists the files it touched, with counts and the message body
+const detail = makeRepo(join(base, 'detail'))
+writeFileSync(join(detail, 'added.txt'), 'a1\na2\n')
+GIT(detail, 'add', 'added.txt')
+GIT(detail, 'rm', '-q', 'a.txt')
+GIT(detail, ...IDENTITY, 'commit', '-q', '-m', 'touch files', '-m', 'body paragraph')
+const touchSha = GIT(detail, 'rev-parse', 'HEAD').trim()
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(detail)}&hash=${touchSha}`)
+assert.equal(r.status, 200)
+assert.equal(r.json.dir, detail)
+assert.equal(r.json.hash, touchSha)
+assert.ok(touchSha.startsWith(r.json.short))
+assert.equal(r.json.subject, 'touch files')
+assert.equal(r.json.body, 'body paragraph')
+assert.equal(r.json.author, 't')
+assert.equal(r.json.email, 't@t')
+assert.deepEqual(r.json.parents, [GIT(detail, 'rev-parse', 'HEAD~1').trim()])
+assert.equal(r.json.truncated, false)
+const fileByPath = new Map(r.json.files.map((file) => [file.path, file]))
+assert.deepEqual([...fileByPath.keys()].sort(), ['a.txt', 'added.txt'])
+assert.deepEqual(fileByPath.get('added.txt'), { path: 'added.txt', status: 'A', additions: 2, deletions: 0, binary: false })
+assert.deepEqual(fileByPath.get('a.txt'), { path: 'a.txt', status: 'D', additions: 0, deletions: 1, binary: false })
+console.log('44 commit files OK', JSON.stringify(r.json.files))
+
+// 45. a rename is reported at its new path, a binary file carries no line counts
+GIT(detail, 'mv', 'added.txt', 'moved.txt')
+GIT(detail, ...IDENTITY, 'commit', '-q', '-m', 'rename added')
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(detail)}&hash=${GIT(detail, 'rev-parse', 'HEAD').trim()}`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.files, [{ path: 'moved.txt', status: 'R', additions: 0, deletions: 0, binary: false }])
+writeFileSync(join(detail, 'blob.bin'), Buffer.from([0, 1, 2, 0, 255, 10, 0]))
+GIT(detail, 'add', 'blob.bin')
+GIT(detail, ...IDENTITY, 'commit', '-q', '-m', 'add blob')
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(detail)}&hash=${GIT(detail, 'rev-parse', 'HEAD').trim()}`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.files, [{ path: 'blob.bin', status: 'A', additions: 0, deletions: 0, binary: true }])
+console.log('45 rename and binary commit files OK')
+
+// 46. commit parameter validation, unknown revision, and the non-repository degrade
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(detail)}&hash=zz`)
+assert.equal(r.status, 400)
+assert.deepEqual(r.json, { error: 'invalid-hash' })
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(detail)}`)
+assert.equal(r.status, 400)
+assert.deepEqual(r.json, { error: 'invalid-hash' })
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(detail)}&hash=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef`)
+assert.equal(r.status, 404)
+assert.equal(r.json.error, 'unknown-commit')
+assert.match(r.json.message, /bad object/i)
+assert.ok(r.json.message.length <= 400)
+r = await call(`/dsh-git-bar/commit?dir=${dirParam(plain)}&hash=${touchSha}`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json, { dir: plain, reason: 'not-a-repository', files: [], truncated: false })
+r = await call(`/dsh-git-bar/commit?hash=${touchSha}`)
+assert.equal(r.status, 400)
+assert.deepEqual(r.json, { error: 'no-directory' })
+console.log('46 commit guards OK')
+
+// 47. commit-diff shows one file's diff inside one commit, and refuses escapes
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&hash=${touchSha}&path=added.txt`)
+assert.equal(r.status, 200)
+assert.equal(r.json.dir, detail)
+assert.equal(r.json.hash, touchSha)
+assert.equal(r.json.path, 'added.txt')
+assert.equal(r.json.truncated, false)
+assert.match(r.json.diff, /^new file mode/m)
+assert.match(r.json.diff, /^\+a1$/m)
+assert.match(r.json.diff, /^\+a2$/m)
+assert.equal(r.json.diff.includes('\u001b['), false)
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&hash=${touchSha}&path=a.txt`)
+assert.equal(r.status, 200)
+assert.match(r.json.diff, /^deleted file mode/m)
+assert.match(r.json.diff, /^-one$/m)
+// an abbreviated hash resolves to the full commit
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&hash=${touchSha.slice(0, 7)}&path=added.txt`)
+assert.equal(r.status, 200)
+assert.equal(r.json.hash, `${touchSha.slice(0, 7)}`)
+assert.match(r.json.diff, /^\+a1$/m)
+for (const bad of ['/etc/passwd', '../etc/passwd', 'a/../added.txt', '-added.txt', '']) {
+  r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&hash=${touchSha}&path=${dirParam(bad)}`)
+  assert.equal(r.status, 400, `expected 400 for path ${JSON.stringify(bad)}`)
+  assert.deepEqual(r.json, { error: 'invalid-path' })
+}
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&path=added.txt`)
+assert.equal(r.status, 400)
+assert.deepEqual(r.json, { error: 'invalid-hash' })
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&hash=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef&path=added.txt`)
+assert.equal(r.status, 404)
+assert.equal(r.json.error, 'unknown-commit')
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(detail)}&hash=${touchSha}&path=not-here.txt`)
+assert.equal(r.status, 200)
+assert.equal(r.json.diff, '')
+assert.equal(r.json.truncated, false)
+r = await call(`/dsh-git-bar/commit-diff?dir=${dirParam(plain)}&hash=${touchSha}&path=added.txt`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json, { dir: plain, reason: 'not-a-repository', diff: '', truncated: false })
+console.log('47 commit-diff OK')
+
+// 48. method guard and the auth gate reach the history routes too
+for (const routePath of ['/dsh-git-bar/log', '/dsh-git-bar/commit', '/dsh-git-bar/commit-diff']) {
+  r = await call(`${routePath}?dir=${dirParam(history)}&hash=${touchSha}&path=added.txt`, { method: 'POST' })
+  assert.equal(r.status, 405, `expected 405 for ${routePath}`)
+  assert.equal(r.headers.allow, 'GET')
+}
+connected = false
+r = await call(`/dsh-git-bar/log?dir=${dirParam(history)}`)
+assert.equal(r.status, 503)
+assert.deepEqual(r.json, { error: 'no-connection' })
+connected = true
+console.log('48 history route guards OK')
 
 rmSync(base, { recursive: true, force: true })
 console.log('\nALL HOST TESTS PASSED')

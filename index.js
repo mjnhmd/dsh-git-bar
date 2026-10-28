@@ -1,18 +1,24 @@
 /**
  * dsh-git-bar — Host half.
  *
- * Seven JSON routes over the platform `git` executable:
+ * Ten JSON routes over the platform `git` executable:
  *
  *   GET  /dsh-git-bar/info?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/branches?sessionId=<id>[&dir=<absolute path>]
+ *   GET  /dsh-git-bar/worktrees?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/changes?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/diff?sessionId=<id>[&dir=<absolute path>]&path=<relative>[&staged=0|1]
+ *   GET  /dsh-git-bar/log?sessionId=<id>[&dir=<absolute path>][&limit=<1..300>]
+ *   GET  /dsh-git-bar/commit?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>
+ *   GET  /dsh-git-bar/commit-diff?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>&path=<relative>
  *   POST /dsh-git-bar/branches/checkout   {"sessionId","dir","branch"}
  *   POST /dsh-git-bar/branches/create     {"sessionId","dir","name","from"?}
  *
  * The routes report the repository a Session runs in, its branches, its changed
- * files, and a single file's unified diff; the two POSTs switch the working
- * tree to another branch. Only the POSTs write, and only by running plain
+ * files, and a single file's unified diff; the three history routes add the
+ * commit graph (`log`), one commit's file list (`commit`) and one file's diff
+ * inside that commit (`commit-diff`), all read-only. The two POSTs switch the
+ * working tree to another branch. Only the POSTs write, and only by running plain
  * `git checkout` with an argument array: no shell, and a branch name that git
  * itself refuses (`git check-ref-format --branch`) never reaches the checkout.
  *
@@ -62,6 +68,15 @@ const ROUTE_CHANGES = '/dsh-git-bar/changes'
 /** Route returning one file's unified diff. */
 const ROUTE_DIFF = '/dsh-git-bar/diff'
 
+/** Route listing the commit graph. */
+const ROUTE_LOG = '/dsh-git-bar/log'
+
+/** Route describing one commit and the files it touched. */
+const ROUTE_COMMIT = '/dsh-git-bar/commit'
+
+/** Route returning one file's diff inside one commit. */
+const ROUTE_COMMIT_DIFF = '/dsh-git-bar/commit-diff'
+
 /** Per-call git timeout. A status read on a large repository stays well below it. */
 const GIT_TIMEOUT_MS = 4000
 
@@ -88,6 +103,37 @@ const NO_DIRTY = { changed: 0, staged: 0, unstaged: 0, untracked: 0 }
 
 /** `for-each-ref` columns: short name, upstream, HEAD marker, last subject. */
 const BRANCH_FORMAT = '%(refname:short)%00%(upstream:short)%00%(HEAD)%00%(subject)'
+
+/**
+ * `git log` record: hash, short hash, parents, author, email, ISO date,
+ * subject, decorations. Fields are separated by US, records by RS — two bytes
+ * git never prints inside a one-line subject.
+ */
+const LOG_FORMAT = '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x1e'
+
+/** `git show` record: the log columns, with the message body in place of the decorations. */
+const COMMIT_FORMAT = '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e'
+
+/** The unit separator `LOG_FORMAT` and `COMMIT_FORMAT` put between columns. */
+const FIELD_SEPARATOR = '\u001f'
+
+/** The record separator `LOG_FORMAT` and `COMMIT_FORMAT` put after a record. */
+const RECORD_SEPARATOR = '\u001e'
+
+/** Commits per `/log` page when the caller asks for no particular size. */
+const DEFAULT_LOG_LIMIT = 60
+
+/** Largest `/log` page a caller may ask for. */
+const MAX_LOG_LIMIT = 300
+
+/** Largest number of files described for one commit; the count still reports them all. */
+const MAX_COMMIT_FILES = 500
+
+/** The only shape a revision may have: 4..40 hex digits, never an option or a path. */
+const HASH_PATTERN = /^[0-9a-f]{4,40}$/i
+
+/** C0 controls and DEL, which no path may contain. */
+const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/
 
 /**
  * Run git in one directory and resolve with its output.
@@ -717,6 +763,60 @@ function validRepoPath(value) {
 }
 
 /**
+ * Decide whether a caller-supplied path may be used as a pathspec inside a commit.
+ *
+ * Stricter than `validRepoPath` on purpose: a leading `-` and any control
+ * character are refused here as well, so the value stays a path even if a
+ * future caller forgets the `--` separator that keeps git from reading it as an
+ * option.
+ *
+ * @param value - candidate path.
+ * @returns true when the path is a plain repository-relative path.
+ */
+function validCommitPath(value) {
+  if (!validRepoPath(value)) return false
+  if (value.startsWith('-')) return false
+  return !CONTROL_PATTERN.test(value)
+}
+
+/**
+ * Decide whether a caller-supplied revision may be handed to git.
+ * @param value - candidate revision.
+ * @returns true for 4..40 hex digits, the only form that cannot name an option or a path.
+ */
+function validHash(value) {
+  return typeof value === 'string' && HASH_PATTERN.test(value)
+}
+
+/**
+ * Read the page size a `/log` request asks for.
+ *
+ * An absent, empty or non-numeric `limit` means the default; a numeric one is
+ * clamped to 1..`MAX_LOG_LIMIT` rather than refused, so a stale client cannot
+ * break the view.
+ *
+ * @param url - parsed request URL.
+ * @returns the page size to use.
+ */
+function parseLimit(url) {
+  const raw = url.searchParams.get('limit')
+  if (raw === null || raw.trim() === '') return DEFAULT_LOG_LIMIT
+  const value = Number(raw)
+  if (!Number.isFinite(value)) return DEFAULT_LOG_LIMIT
+  return Math.min(MAX_LOG_LIMIT, Math.max(1, Math.trunc(value)))
+}
+
+/**
+ * Cut an oversized diff at the shared character cap.
+ * @param result - the `runGit` result of a diff command.
+ * @returns the (possibly cut) diff text and whether it had to be cut.
+ */
+function boundedDiff(result) {
+  const truncated = result.overflow || result.out.length > DIFF_LIMIT_CHARS
+  return { diff: truncated ? result.out.slice(0, DIFF_LIMIT_CHARS) : result.out, truncated }
+}
+
+/**
  * Read one file's unified diff.
  * @param dir - absolute directory.
  * @param path - repo-relative path.
@@ -743,8 +843,285 @@ async function readDiff(dir, path, staged) {
   }
   // An overflow is a cut diff, not a failed one: the prefix in `out` is real.
   if (!result.ok && !result.overflow) throw new Error(failureMessage(result))
-  const truncated = result.overflow || result.out.length > DIFF_LIMIT_CHARS
-  return { diff: truncated ? result.out.slice(0, DIFF_LIMIT_CHARS) : result.out, truncated }
+  return boundedDiff(result)
+}
+
+/**
+ * Shorten one `--decorate=full` refname to the name a badge shows.
+ * @param value - full refname.
+ * @returns the name with its `refs/heads/`, `refs/remotes/` or `refs/tags/` prefix removed.
+ */
+function shortRefName(value) {
+  return value.replace(/^refs\/(?:heads|remotes|tags)\//, '').replace(/^refs\//, '')
+}
+
+/**
+ * Classify one `--decorate=full` refname.
+ * @param value - full refname.
+ * @returns 'remote', 'tag' or 'local'.
+ */
+function refKindFor(value) {
+  if (value.startsWith('refs/remotes/')) return 'remote'
+  if (value.startsWith('refs/tags/')) return 'tag'
+  return 'local'
+}
+
+/**
+ * Parse the `%D` column of a `git log` record into reference badges.
+ *
+ * `--decorate=full` prints `HEAD -> refs/heads/main`, `tag: refs/tags/v1` and
+ * bare refnames, joined with `, `; a detached HEAD is the word `HEAD` alone.
+ * The branch HEAD points at is reported with kind `head`: a row shows one badge
+ * per ref, and "HEAD is here" is the more useful of the two facts, while
+ * `refs/remotes/origin/HEAD` stays a `remote` because it names a remote branch.
+ *
+ * @param decorations - the `%D` field, possibly empty.
+ * @returns one `{ name, kind }` entry per decoration.
+ */
+function parseRefs(decorations) {
+  const refs = []
+  if (typeof decorations !== 'string' || decorations === '') return refs
+  for (const part of decorations.split(/,\s+/)) {
+    const entry = part.trim()
+    if (entry === '') continue
+    if (entry.startsWith('tag: ')) {
+      refs.push({ name: shortRefName(entry.slice(5).trim()), kind: 'tag' })
+      continue
+    }
+    if (entry === 'HEAD') {
+      refs.push({ name: 'HEAD', kind: 'head' })
+      continue
+    }
+    const head = /^HEAD -> (.+)$/.exec(entry)
+    if (head !== null) {
+      refs.push({ name: shortRefName(head[1]), kind: 'head' })
+      continue
+    }
+    refs.push({ name: shortRefName(entry), kind: refKindFor(entry) })
+  }
+  return refs
+}
+
+/**
+ * Build one commit row from its `LOG_FORMAT` columns.
+ * @param fields - the eight log columns.
+ * @returns the commit record sent to the Client half.
+ */
+function logCommit(fields) {
+  return {
+    hash: fields[0],
+    short: fields[1],
+    parents: fields[2] === '' ? [] : fields[2].split(' '),
+    author: fields[3],
+    email: fields[4],
+    when: fields[5],
+    subject: fields[6],
+    refs: parseRefs(fields[7]),
+  }
+}
+
+/**
+ * Parse a `git log` body written in `LOG_FORMAT`.
+ *
+ * Records are separated by `RECORD_SEPARATOR` followed by a newline, so each
+ * chunk is trimmed before its columns are split. A record shorter than eight
+ * columns was cut in half by a buffer overflow and is dropped instead of being
+ * reported with missing fields.
+ *
+ * @param text - raw stdout.
+ * @returns the parsed commit rows, in git's order.
+ */
+function parseLog(text) {
+  const commits = []
+  for (const chunk of text.split(RECORD_SEPARATOR)) {
+    const record = chunk.trim()
+    if (record === '') continue
+    const fields = record.split(FIELD_SEPARATOR)
+    if (fields.length < 8) continue
+    commits.push(logCommit(fields))
+  }
+  return commits
+}
+
+/**
+ * Read one page of the commit graph.
+ *
+ * `--all` widens the log to every ref — that is what makes the graph show
+ * branches that are not checked out — and `--topo-order` keeps children above
+ * their parents so the Client can draw lanes downward. One record beyond the
+ * page size is what tells whether another page exists.
+ *
+ * An unborn repository logs an empty history and exits 0, so a failing `git
+ * log` means git cannot read this directory as a repository at all.
+ *
+ * @param dir - absolute directory, whether or not it is a repository.
+ * @param limit - page size, already clamped.
+ * @returns the commits, the paging flags, and the reason when there are none.
+ */
+async function readLog(dir, limit) {
+  const result = await runGit(
+    dir,
+    ['log', '--all', '--topo-order', '--decorate=full', '-n', String(limit + 1), `--format=${LOG_FORMAT}`],
+    { trim: false },
+  )
+  if (!result.ok && !result.overflow) {
+    return { commits: [], hasMore: false, truncated: false, reason: 'not-a-repository' }
+  }
+  const commits = parseLog(result.out)
+  const hasMore = commits.length > limit
+  return {
+    commits: hasMore ? commits.slice(0, limit) : commits,
+    hasMore,
+    truncated: result.overflow,
+  }
+}
+
+/**
+ * The post-change path of a `--numstat` path column.
+ *
+ * A rename prints `old => new`, or `pre{a => b}post` when the two paths share a
+ * prefix and a suffix. Both forms are collapsed onto the path the file has in
+ * this commit, which is the path `--name-status` reports, so the two commands
+ * can be joined.
+ *
+ * @param value - the third tab-separated column of a numstat line.
+ * @returns the path after the change.
+ */
+function numstatPath(value) {
+  const braced = /\{(.*?) => (.*?)\}/.exec(value)
+  if (braced !== null) return value.replace(braced[0], braced[2])
+  const parts = value.split(' => ')
+  return parts.length === 2 ? parts[1] : value
+}
+
+/**
+ * Parse the `--numstat` half of a `git show` reply.
+ * @param text - everything git printed after the commit record.
+ * @returns a map from path to its line counts; `binary` is set for `-`/`-`.
+ */
+function parseNumstat(text) {
+  const stats = new Map()
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const parts = line.split('\t')
+    if (parts.length < 3) continue
+    const path = numstatPath(parts.slice(2).join('\t'))
+    if (path === '') continue
+    const binary = parts[0] === '-' && parts[1] === '-'
+    const additions = Number(parts[0])
+    const deletions = Number(parts[1])
+    stats.set(path, {
+      binary,
+      additions: binary || !Number.isFinite(additions) ? 0 : additions,
+      deletions: binary || !Number.isFinite(deletions) ? 0 : deletions,
+    })
+  }
+  return stats
+}
+
+/**
+ * Parse `--name-status` output into status rows.
+ * @param text - raw stdout, one `<letter>\t<path>` (or `<letter>\t<old>\t<new>`) per line.
+ * @returns one `{ path, status }` row per file, `path` being the post-change path
+ *   and `status` the single letter git printed.
+ */
+function parseNameStatus(text) {
+  const files = []
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const parts = line.split('\t')
+    const letter = (parts[0] ?? '')[0]
+    if (letter === undefined || letter === '') continue
+    const renamed = letter === 'R' || letter === 'C'
+    const path = renamed ? parts[2] ?? parts[1] ?? '' : parts[1] ?? ''
+    if (path === '') continue
+    files.push({ path, status: letter })
+  }
+  return files
+}
+
+/**
+ * Describe one commit and the files it touched.
+ *
+ * `git show --numstat` carries the line counts and `git diff-tree
+ * --name-status` the one-letter status; the two are joined on the path the file
+ * has after the change. A path `--numstat` does not mention — a merge commit,
+ * whose `--name-status` output is empty anyway — keeps 0/0 and is not binary.
+ *
+ * @param dir - absolute directory.
+ * @param hash - 4..40 hex digits, already validated.
+ * @returns `{ commit }` on success, or `{ failure }` holding git's own message.
+ */
+async function readCommit(dir, hash) {
+  const [shown, named] = await Promise.all([
+    runGit(dir, ['show', '--no-ext-diff', `--format=${COMMIT_FORMAT}`, '--numstat', hash], { trim: false }),
+    runGit(dir, ['diff-tree', '--no-commit-id', '--name-status', '-r', '-M', hash]),
+  ])
+  if (!shown.ok && !shown.overflow) return { failure: failureMessage(shown) }
+  if (!named.ok) return { failure: failureMessage(named) }
+  const cut = shown.out.indexOf(RECORD_SEPARATOR)
+  const header = cut === -1 ? shown.out : shown.out.slice(0, cut)
+  const fields = header.split(FIELD_SEPARATOR)
+  if (fields.length < 8) return { failure: 'git returned an unreadable commit record' }
+  const stats = parseNumstat(cut === -1 ? '' : shown.out.slice(cut + 1))
+  const rows = parseNameStatus(named.out)
+  const files = rows.slice(0, MAX_COMMIT_FILES).map((row) => {
+    const lines = stats.get(row.path)
+    return {
+      path: row.path,
+      status: row.status,
+      additions: lines?.additions ?? 0,
+      deletions: lines?.deletions ?? 0,
+      binary: lines?.binary ?? false,
+    }
+  })
+  return {
+    commit: {
+      hash: fields[0],
+      short: fields[1],
+      parents: fields[2] === '' ? [] : fields[2].split(' '),
+      author: fields[3],
+      email: fields[4],
+      when: fields[5],
+      subject: fields[6],
+      body: (fields[7] ?? '').trim(),
+      files,
+      truncated: rows.length > MAX_COMMIT_FILES || shown.overflow || named.overflow,
+    },
+  }
+}
+
+/**
+ * Read one file's diff inside one commit.
+ *
+ * `--format=` drops the commit header so the reply is a plain unified diff,
+ * which is what the Client's per-file viewer renders.
+ *
+ * @param dir - absolute directory.
+ * @param hash - 4..40 hex digits, already validated.
+ * @param path - repository-relative path, already validated.
+ * @returns `{ diff, truncated }`, or `{ failure }` holding git's own message.
+ */
+async function readCommitDiff(dir, hash, path) {
+  const result = await runGit(dir, ['show', '--format=', '--no-ext-diff', '--unified=3', hash, '--', path], {
+    trim: false,
+  })
+  if (!result.ok && !result.overflow) return { failure: failureMessage(result) }
+  return boundedDiff(result)
+}
+
+/**
+ * Ask git whether a directory belongs to a work tree.
+ *
+ * Used only after a command failed, to tell "this is not a repository" (a
+ * degraded answer) from "this revision does not exist" (a 404).
+ *
+ * @param dir - absolute directory.
+ * @returns true when git commands there can resolve revisions.
+ */
+async function insideWorkTree(dir) {
+  const result = await runGit(dir, ['rev-parse', '--is-inside-work-tree'])
+  return result.ok && result.out === 'true'
 }
 
 /**
@@ -806,7 +1183,7 @@ async function servePost(ctx, req, res, slug, run) {
 }
 
 /**
- * Mount the seven routes.
+ * Mount the ten routes.
  * @param ctx - plugin context; `webServer` arrives through `inject`.
  */
 export function apply(ctx) {
@@ -937,5 +1314,68 @@ export function apply(ctx) {
           }),
       }),
     `git-bar: POST ${ROUTE_CREATE}`,
+  )
+
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTE_LOG,
+        handler: (req, res) =>
+          serveGet(ctx, req, res, 'log-failed', async (dir, url) => ({
+            status: 200,
+            body: { dir, ...(await readLog(dir, parseLimit(url))) },
+          })),
+      }),
+    `git-bar: GET ${ROUTE_LOG}`,
+  )
+
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTE_COMMIT,
+        handler: (req, res) =>
+          serveGet(ctx, req, res, 'commit-failed', async (dir, url) => {
+            const hash = url.searchParams.get('hash') ?? ''
+            if (!validHash(hash)) return { status: 400, body: { error: 'invalid-hash' } }
+            const described = await readCommit(dir, hash)
+            if (described.commit !== undefined) return { status: 200, body: { dir, ...described.commit } }
+            // Outside a repository git's complaint is "not a git repository",
+            // which is a degraded answer about the directory, not an unknown commit.
+            if (!(await insideWorkTree(dir))) {
+              return { status: 200, body: { dir, reason: 'not-a-repository', files: [], truncated: false } }
+            }
+            return { status: 404, body: { error: 'unknown-commit', message: described.failure } }
+          }),
+      }),
+    `git-bar: GET ${ROUTE_COMMIT}`,
+  )
+
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTE_COMMIT_DIFF,
+        handler: (req, res) =>
+          serveGet(ctx, req, res, 'commit-diff-failed', async (dir, url) => {
+            const hash = url.searchParams.get('hash') ?? ''
+            const path = url.searchParams.get('path') ?? ''
+            if (!validHash(hash)) return { status: 400, body: { error: 'invalid-hash' } }
+            if (!validCommitPath(path)) return { status: 400, body: { error: 'invalid-path' } }
+            const described = await readCommitDiff(dir, hash, path)
+            if (described.diff !== undefined) {
+              return {
+                status: 200,
+                body: { dir, hash, path, diff: described.diff, truncated: described.truncated },
+              }
+            }
+            if (!(await insideWorkTree(dir))) {
+              return { status: 200, body: { dir, reason: 'not-a-repository', diff: '', truncated: false } }
+            }
+            return { status: 404, body: { error: 'unknown-commit', message: described.failure } }
+          }),
+      }),
+    `git-bar: GET ${ROUTE_COMMIT_DIFF}`,
   )
 }
