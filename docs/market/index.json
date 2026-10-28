@@ -78,6 +78,18 @@
           }
         },
         {
+          "version": "0.4.0",
+          "publishTimestamp": 1793156306,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/mjnhmd/dsh-git-bar",
+            "commit": "d0a00951921ff92f16a16d6042834bad09542feb"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2"
+          }
+        },
+        {
           "version": "0.3.0",
           "publishTimestamp": 1793155664,
           "source": {
