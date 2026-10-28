@@ -236,4 +236,14 @@ assert.ok(historyText.includes('T:history.title'), historyText)
 assert.ok(historyText.includes('T:history.loading'), historyText)
 console.log('17 history view first paint OK:', historyText)
 
+// 18. 筛选栏：分支 / 提交人两个下拉；未筛选时不出现「重置」
+const filterBar = findAll(historyTree, (node) => node.props['data-history-filters'] !== undefined)[0]
+assert.ok(filterBar !== undefined, 'filter row rendered')
+const chips = findAll(filterBar, (node) => typeof node.props['data-history-chip'] === 'string')
+assert.deepEqual(chips.map((chip) => chip.props['data-history-chip']), ['branch', 'author'])
+assert.deepEqual(textOf(chips[0]), ['T:history.allBranches'])
+assert.deepEqual(textOf(chips[1]), ['T:history.allAuthors'])
+assert.equal(findAll(filterBar, (node) => node.props['data-history-reset'] !== undefined).length, 0)
+console.log('18 filter row OK:', chips.length, 'chips')
+
 console.log('\nALL CLIENT TESTS PASSED')

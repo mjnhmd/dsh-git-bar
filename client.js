@@ -50,6 +50,8 @@ window.__ModuleLoader__.load({
     const HISTORY_VIEW_ID = 'git-bar-history'
     /** Commits asked for by one page, and added by every "load more". */
     const HISTORY_PAGE = 60
+    /** Distance from the list bottom, in px, that triggers the next page. */
+    const HISTORY_SCROLL_SLACK = 120
     /** Width of one graph lane. */
     const LANE_W = 12
     /** Height of one history row; the graph cell is drawn to the same grid. */
@@ -115,6 +117,13 @@ window.__ModuleLoader__.load({
       'history.tab': 'Git 历史',
       'history.count': '{count} 笔提交',
       'history.filter': '搜索提交信息或哈希',
+      'history.branch': '分支',
+      'history.author': '提交人',
+      'history.allBranches': '全部分支',
+      'history.allAuthors': '全部提交人',
+      'history.reset': '重置筛选',
+      'history.filterBranch': '按分支筛选',
+      'history.filterAuthor': '按提交人筛选',
       'history.refresh': '刷新',
       'history.loading': '正在读取提交历史…',
       'history.failed': '读取提交历史失败',
@@ -185,6 +194,13 @@ window.__ModuleLoader__.load({
       'history.tab': 'Git history',
       'history.count': '{count} commits',
       'history.filter': 'Filter by message or hash',
+      'history.branch': 'Branch',
+      'history.author': 'Author',
+      'history.allBranches': 'All branches',
+      'history.allAuthors': 'All authors',
+      'history.reset': 'Clear filters',
+      'history.filterBranch': 'Filter by branch',
+      'history.filterAuthor': 'Filter by author',
       'history.refresh': 'Refresh',
       'history.loading': 'Reading history…',
       'history.failed': 'Could not read history',
@@ -1737,6 +1753,68 @@ window.__ModuleLoader__.load({
         border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
         borderRadius: '6px',
       },
+      filterRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '4px 10px 6px',
+        flex: 'none',
+        borderBottom: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
+      },
+      chipWrap: { position: 'relative', flex: 'none' },
+      chip: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        maxWidth: '190px',
+        padding: '2px 8px',
+        font: 'inherit',
+        fontSize: '11.5px',
+        lineHeight: '18px',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)',
+        background: 'none',
+        border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
+        borderRadius: '999px',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      chipActive: {
+        color: 'var(--dsw-alias-state-business-primary, #1d4ed8)',
+        borderColor: 'var(--dsw-alias-state-business-primary, #1d4ed8)',
+      },
+      menu: {
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        left: 0,
+        zIndex: 20,
+        minWidth: '160px',
+        maxWidth: '320px',
+        maxHeight: '240px',
+        overflow: 'auto',
+        padding: '4px',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--dsw-alias-bg-layer-1, #fff)',
+        border: '1px solid var(--dsw-alias-border-l2, #e5e7eb)',
+        borderRadius: '8px',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+      },
+      menuItem: {
+        padding: '4px 8px',
+        font: 'inherit',
+        fontSize: '12px',
+        textAlign: 'left',
+        color: 'var(--dsw-alias-label-primary, inherit)',
+        background: 'none',
+        border: 'none',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      menuItemActive: { background: 'var(--dsw-alias-interactive-bg-active, #eef2f7)' },
       body: { display: 'flex', flex: '1 1 auto', minHeight: 0 },
       list: {
         flex: '1 1 52%',
@@ -2144,13 +2222,16 @@ window.__ModuleLoader__.load({
       const readCwd = typeof props.readCwd === 'function' ? props.readCwd : () => undefined
       const dir = readCwd() ?? ''
 
-      const [page, setPage] = React.useState({ limit: HISTORY_PAGE, nonce: 0 })
+      const [page, setPage] = React.useState({ limit: HISTORY_PAGE, nonce: 0, branch: '', author: '' })
       const [log, setLog] = React.useState({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
       const [filter, setFilter] = React.useState('')
       const [picked, setPicked] = React.useState('')
       const [detail, setDetail] = React.useState({ phase: 'idle', subject: '', body: '', short: '', author: '', when: '', files: [], error: '', truncated: false })
       const [pickedPath, setPickedPath] = React.useState('')
       const [diff, setDiff] = React.useState({ phase: 'idle', text: '', truncated: false })
+      const [menu, setMenu] = React.useState('')
+      const [branches, setBranches] = React.useState([])
+      const [authors, setAuthors] = React.useState([])
 
       const queryFor = (extra) => {
         const params = new URLSearchParams({ sessionId })
@@ -2160,6 +2241,18 @@ window.__ModuleLoader__.load({
           if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
         }
         return params.toString()
+      }
+
+      const listRef = React.useRef(null)
+      const loadMore = () => setPage((current) => ({ ...current, limit: current.limit + HISTORY_PAGE }))
+
+      // 滚到底部附近就续一页，不用手动点「加载更多」。
+      const onListScroll = (event) => {
+        if (log.phase !== 'ready' || !log.hasMore) return
+        const node = event?.currentTarget
+        if (!node || typeof node.scrollTop !== 'number') return
+        if (node.scrollHeight - node.scrollTop - node.clientHeight > HISTORY_SCROLL_SLACK) return
+        loadMore()
       }
 
       const getJson = async (route, extra) => {
@@ -2176,7 +2269,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         let live = true
         setLog({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
-        getJson(LOG_ROUTE, { limit: page.limit })
+        getJson(LOG_ROUTE, { limit: page.limit, branch: page.branch, author: page.author })
           .then((body) => {
             if (!live) return
             setLog({
@@ -2194,7 +2287,57 @@ window.__ModuleLoader__.load({
         return () => {
           live = false
         }
-      }, [sessionId, dir, page.limit, page.nonce])
+      }, [sessionId, dir, page.limit, page.nonce, page.branch, page.author])
+
+      // 一页装不满可视区（大窗口）时自动再要一页，否则没有滚动条也就没有滚动事件。
+      React.useEffect(() => {
+        if (log.phase !== 'ready' || !log.hasMore) return
+        const node = listRef.current
+        if (!node || typeof node.clientHeight !== 'number' || node.clientHeight <= 0) return
+        if (typeof node.scrollHeight !== 'number') return
+        if (node.scrollHeight > node.clientHeight + HISTORY_SCROLL_SLACK) return
+        loadMore()
+      }, [log.phase, log.hasMore, log.commits.length])
+
+      // 分支下拉第一次打开时才拉，失败也不影响主列表。
+      React.useEffect(() => {
+        if (menu !== 'branch' || branches.length > 0) return
+        let live = true
+        getJson(BRANCHES_ROUTE, {})
+          .then((body) => {
+            if (!live) return
+            setBranches(
+              (Array.isArray(body.branches) ? body.branches : [])
+                .map((branch) => String(branch?.name ?? ''))
+                .filter((name) => name !== ''),
+            )
+          })
+          .catch(() => {
+            if (live) setBranches([])
+          })
+        return () => {
+          live = false
+        }
+      }, [menu, branches.length])
+
+      // 提交人候选从已加载的提交里累积，翻页后仍记得前面出现过的作者。
+      React.useEffect(() => {
+        if (log.phase !== 'ready') return
+        const names = log.commits
+          .map((commit) => String(commit?.author ?? '').trim())
+          .filter((name) => name !== '')
+        if (names.length === 0) return
+        setAuthors((current) => {
+          const known = new Set(current)
+          let grew = false
+          for (const name of names) {
+            if (known.has(name)) continue
+            known.add(name)
+            grew = true
+          }
+          return grew ? Array.from(known).sort((left, right) => left.localeCompare(right)) : current
+        })
+      }, [log.phase, log.commits])
 
       React.useEffect(() => {
         if (picked === '') {
@@ -2293,6 +2436,84 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      const applyFilter = (kind, value) =>
+        setPage((current) => ({
+          limit: HISTORY_PAGE,
+          nonce: current.nonce + 1,
+          branch: kind === 'branch' ? String(value) : current.branch,
+          author: kind === 'author' ? String(value) : current.author,
+        }))
+
+      const filterChip = (kind, label, allLabel, options) =>
+        h(
+          'div',
+          { style: historyStyles.chipWrap },
+          h(
+            'button',
+            {
+              type: 'button',
+              style: page[kind] === '' ? historyStyles.chip : { ...historyStyles.chip, ...historyStyles.chipActive },
+              title: label,
+              'aria-haspopup': 'listbox',
+              'aria-expanded': menu === kind ? 'true' : 'false',
+              'data-history-chip': kind,
+              onClick: () => setMenu(menu === kind ? '' : kind),
+            },
+            page[kind] === '' ? allLabel : page[kind],
+          ),
+          menu !== kind
+            ? null
+            : h(
+                'div',
+                { style: historyStyles.menu, role: 'listbox' },
+                [{ value: '', label: allLabel }]
+                  .concat(options.map((option) => ({ value: option, label: option })))
+                  .map((item) =>
+                    h(
+                      'button',
+                      {
+                        key: `${kind}:${item.value}`,
+                        type: 'button',
+                        role: 'option',
+                        'aria-selected': page[kind] === item.value ? 'true' : 'false',
+                        'data-history-option': item.value,
+                        style:
+                          page[kind] === item.value
+                            ? { ...historyStyles.menuItem, ...historyStyles.menuItemActive }
+                            : historyStyles.menuItem,
+                        title: item.label,
+                        onClick: () => {
+                          applyFilter(kind, item.value)
+                          setMenu('')
+                        },
+                      },
+                      item.label,
+                    ),
+                  ),
+              ),
+        )
+
+      const hasFilters = page.branch !== '' || page.author !== ''
+      const filterRow = h(
+        'div',
+        { style: historyStyles.filterRow, 'data-history-filters': '' },
+        filterChip('branch', t('history.filterBranch'), t('history.allBranches'), branches),
+        filterChip('author', t('history.filterAuthor'), t('history.allAuthors'), authors),
+        hasFilters
+          ? h(
+              'button',
+              {
+                type: 'button',
+                style: historyStyles.chip,
+                title: t('history.reset'),
+                'data-history-reset': '',
+                onClick: () => setPage({ limit: HISTORY_PAGE, nonce: page.nonce + 1, branch: '', author: '' }),
+              },
+              t('history.reset'),
+            )
+          : null,
+      )
+
       const list =
         log.phase === 'loading'
           ? h('div', { style: historyStyles.hint }, t('history.loading'))
@@ -2302,7 +2523,11 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   { style: historyStyles.hint },
-                  log.reason === 'not-a-repository' ? t('history.notRepository') : t('history.empty'),
+                  log.reason === 'not-a-repository'
+                    ? t('history.notRepository')
+                    : hasFilters
+                      ? t('history.nomatch')
+                      : t('history.empty'),
                 )
               : visible.length === 0
                 ? h('div', { style: historyStyles.hint }, t('history.nomatch'))
@@ -2349,15 +2574,7 @@ window.__ModuleLoader__.load({
                       )
                     }),
                     log.hasMore
-                      ? h(
-                          'button',
-                          {
-                            type: 'button',
-                            style: { ...styles.paneAction, marginLeft: 0, padding: '6px 10px' },
-                            onClick: () => setPage({ limit: page.limit + HISTORY_PAGE, nonce: page.nonce }),
-                          },
-                          t('history.more'),
-                        )
+                      ? h('div', { style: historyStyles.hint, 'data-history-more': '' }, t('history.more'))
                       : null,
                   )
 
@@ -2434,10 +2651,15 @@ window.__ModuleLoader__.load({
         'div',
         { style: historyStyles.view, 'data-dsh-git-bar-history': '' },
         head,
+        filterRow,
         h(
           'div',
           { style: historyStyles.body },
-          h('div', { style: historyStyles.list, 'data-history-list': '' }, list),
+          h(
+            'div',
+            { ref: listRef, style: historyStyles.list, 'data-history-list': '', onScroll: onListScroll },
+            list,
+          ),
           h('div', { style: historyStyles.detail, 'data-history-detail': '' }, detailPane),
         ),
       )

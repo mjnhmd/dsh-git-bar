@@ -179,6 +179,27 @@ const logReply = {
     { hash: 'c0000001', short: 'c0000001', subject: 'Initial commit', author: 'Ada', when: '2026-10-24T02:00:00Z', parents: [], refs: [] },
   ],
 }
+// 服务端筛选：branch / author 各有一张允许清单，limit 决定 hasMore。
+const branchAllowed = { main: ['m0000001', 'a0000001', 'c0000001'], 'codex/perf': ['b0000001', 'c0000001'] }
+const authorAllowed = { Ada: ['m0000001', 'a0000001', 'c0000001'], Bob: ['b0000001'] }
+const logReplyFor = (url) => {
+  const query = new URLSearchParams(url.slice(url.indexOf('?') + 1))
+  const branch = query.get('branch') ?? ''
+  const author = query.get('author') ?? ''
+  const limit = Number(query.get('limit') ?? '60')
+  let allowed = null
+  if (branch !== '') allowed = new Set(branchAllowed[branch] ?? [])
+  if (author !== '') {
+    const names = authorAllowed[author] ?? []
+    allowed = allowed === null ? new Set(names) : new Set(names.filter((hash) => allowed.has(hash)))
+  }
+  return {
+    ...logReply,
+    commits: allowed === null ? logReply.commits : logReply.commits.filter((commit) => allowed.has(commit.hash)),
+    hasMore: limit < 120,
+    filters: { branch: branch === '' ? null : branch, author: author === '' ? null : author },
+  }
+}
 const commitReply = {
   hash: 'm0000001',
   short: 'm0000001',
@@ -200,7 +221,7 @@ globalThis.fetch = async (url) => {
   if (text.startsWith('/dsh-git-bar/branches')) return { ok: true, json: async () => branchReply }
   if (text.startsWith('/dsh-git-bar/commit-diff')) return { ok: true, json: async () => commitDiffReply }
   if (text.startsWith('/dsh-git-bar/commit')) return { ok: true, json: async () => commitReply }
-  if (text.startsWith('/dsh-git-bar/log')) return { ok: true, json: async () => logReply }
+  if (text.startsWith('/dsh-git-bar/log')) return { ok: true, json: async () => logReplyFor(text) }
   if (text.startsWith('/dsh-git-bar/info')) return { ok: true, json: async () => infoReply }
   return { ok: false, status: 404, json: async () => ({}) }
 }
@@ -366,5 +387,76 @@ historyTree = runtime.rerender(historyElement)
 const filtered = findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string')
 assert.deepEqual(filtered.map((row) => row.props['data-history-commit']), ['c0000001'])
 console.log('9 filter OK:', filtered.length, 'row')
+
+// 10. 分支下拉：选项来自 /branches，选中后带 branch 参数重拉列表
+const clearInput = findAll(historyTree, (node) => node.props['data-history-filter'] !== undefined)[0]
+clearInput.props.onChange({ target: { value: '' } })
+historyTree = runtime.rerender(historyElement)
+const branchChip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'branch')[0]
+branchChip.props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+assert.ok(fetches.some((url) => url.startsWith('/dsh-git-bar/branches')), 'branch list fetched for the dropdown')
+const branchOptions = findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string')
+assert.deepEqual(
+  branchOptions.map((option) => option.props['data-history-option']),
+  ['', 'codex/perf', 'main', 'ghost'],
+  'all-branches entry plus every local branch',
+)
+branchOptions.find((option) => option.props['data-history-option'] === 'main').props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+assert.ok(
+  fetches.some((url) => url.includes('/dsh-git-bar/log') && url.includes('branch=main')),
+  'log refetched with branch=main',
+)
+const mainRows = findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string')
+assert.deepEqual(mainRows.map((row) => row.props['data-history-commit']), ['m0000001', 'a0000001', 'c0000001'])
+console.log('10 branch dropdown OK:', mainRows.length, 'rows on main')
+
+// 11. 重置：清掉筛选并重新拉全量，重置按钮随之消失
+const resetButton = findAll(historyTree, (node) => node.props['data-history-reset'] !== undefined)[0]
+assert.ok(resetButton !== undefined, 'reset appears once a filter is active')
+resetButton.props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+const lastLog = fetches.filter((url) => url.includes('/dsh-git-bar/log')).at(-1)
+assert.ok(!lastLog.includes('branch='), `reset drops branch: ${lastLog}`)
+assert.ok(!lastLog.includes('author='), `reset drops author: ${lastLog}`)
+assert.equal(findAll(historyTree, (node) => node.props['data-history-reset'] !== undefined).length, 0)
+console.log('11 reset OK')
+
+// 12. 提交人下拉：候选来自已加载的提交，选中后带 author 参数重拉
+const authorChip = findAll(historyTree, (node) => node.props['data-history-chip'] === 'author')[0]
+authorChip.props.onClick()
+historyTree = runtime.rerender(historyElement)
+const authorOptions = findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string')
+assert.deepEqual(
+  authorOptions.map((option) => option.props['data-history-option']),
+  ['', 'Ada', 'Bob'],
+  'authors collected from the loaded commits',
+)
+authorOptions.find((option) => option.props['data-history-option'] === 'Bob').props.onClick()
+await flush()
+historyTree = runtime.rerender(historyElement)
+assert.ok(
+  fetches.some((url) => url.includes('/dsh-git-bar/log') && url.includes('author=Bob')),
+  'log refetched with author=Bob',
+)
+const bobRows = findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string')
+assert.deepEqual(bobRows.map((row) => row.props['data-history-commit']), ['b0000001'])
+console.log('12 author dropdown OK:', bobRows.length, 'row by Bob')
+
+// 13. 滚到底部自动续页：没有手动「加载更多」按钮，滚动到底部就多发一页
+const listNode = findAll(historyTree, (node) => node.props['data-history-list'] !== undefined)[0]
+assert.equal(typeof listNode.props.onScroll, 'function', 'list listens to scroll')
+listNode.props.onScroll({ currentTarget: { scrollTop: 400, clientHeight: 300, scrollHeight: 780 } })
+await flush()
+historyTree = runtime.rerender(historyElement)
+const pagedLog = fetches.filter((url) => url.includes('/dsh-git-bar/log')).at(-1)
+assert.ok(pagedLog.includes('limit=120'), `scroll near the bottom asks for the next page: ${pagedLog}`)
+const manualMore = findAll(historyTree, (node) => node.type === 'button' && textOf(node).join('') === 'T:history.more')
+assert.equal(manualMore.length, 0, 'no manual load-more button any more')
+console.log('13 infinite scroll OK:', pagedLog.slice(pagedLog.indexOf('?')))
 
 console.log('\nALL INTERACTION TESTS PASSED')
