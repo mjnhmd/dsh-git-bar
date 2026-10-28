@@ -94,7 +94,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-git-bar
 | `POST /dsh-git-bar/branches/create` | 请求 `{ sessionId, name, from? }`，通过 `git check-ref-format --branch` 校验名称，成功返回 `{ branch, created: true }` |
 | `GET /dsh-git-bar/changes?sessionId=<id>` | 返回 `{ files, dirty, truncated }`，文件含路径、状态、暂存标记和增删行数，最多 500 个文件 |
 | `GET /dsh-git-bar/diff?sessionId=<id>&path=<repo-relative>&staged=0\|1` | 返回 `{ path, staged, diff, truncated }`，diff 最多 200,000 个字符 |
-| `GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300][&branch=<ref>][&author=<text>]` | 返回 `{ dir, commits, hasMore, truncated, filters: { branch, author } }`；提交含 `hash`、`short`、`parents`、`author`、`email`、`when`、`subject`、`refs: [{ name, kind }]`（`kind` 为 `head` / `local` / `remote` / `tag`，`name` 是短名）。默认 60 笔，最多 300 |
+| `GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300][&skip=0..][&branch=<ref>][&author=<text>]` | 返回 `{ dir, commits, hasMore, truncated, filters: { branch, author } }`；提交含 `hash`、`short`、`parents`、`author`、`email`、`when`、`subject`、`refs: [{ name, kind }]`（`kind` 为 `head` / `local` / `remote` / `tag`，`name` 是短名）。默认 60 笔，最多 300；`skip` 是要跳过的笔数，历史靠它翻页（客户端累积续页），不靠放大 `limit` |
 | `GET /dsh-git-bar/commit?sessionId=<id>&hash=<4..40 hex>` | 返回 `{ dir, hash, short, parents, author, email, when, subject, body, files, truncated }`；文件含 `path`、`status`、`additions`、`deletions`、`binary`，最多 500 个 |
 | `GET /dsh-git-bar/authors?sessionId=<id>` | 返回 `{ dir, authors: [{ name, email, count }], truncated }`；在 `git log --all` 上聚合，提交数降序、同数量按姓名升序，最多 500 条 |
 | `GET /dsh-git-bar/commit-diff?sessionId=<id>&hash=<4..40 hex>&path=<repo-relative>` | 返回 `{ dir, hash, path, diff, truncated }`，即这笔提交里该文件的统一 diff，同样最多 200,000 个字符 |

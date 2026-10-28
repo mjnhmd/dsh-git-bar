@@ -58,3 +58,17 @@
   实测 `ALL INTERACTION TESTS PASSED`（16 步）。
 - 待确认：重启桌面端后，面板能否用滚轮滚、滚到底续页是否还跳顶。
 - 未授权：本轮改动未推送。
+
+## 「提交列表卡 300 / 筛选下拉滚不动」修复（本轮，未发版）
+- 已完成：`/log` 加 `skip` 偏移量（Host `parseSkip` + `readLog(..., skip)` + `--skip=N`），
+  客户端每页固定问 60 笔、滚到底按「已加载笔数」当 `skip` 续页并累积去重，续页失败保留已加载行；
+  上限 `HISTORY_MAX_COMMITS = 3000` 时列表底部提示「缩小筛选范围」。
+- 已完成：筛选面板改为 `portalToBody()` 离场到 `document.body`（缺 `react-dom` 就地渲染兜底），
+  下方放不下 `MENU_LIST_MIN + 40` 时翻到按钮上方，列表高度按 `room - 40` 取 `[120, 240]`。
+- 已完成：README 中英 `/log` 契约补 `skip`，`index.js` 路由注释同步。
+- 已验证：`npm run check`（隐私检查 31 文件无命中）、`npm test` 全绿 —— Host 新增
+  `42b log skip paging OK 400 commits over 7 pages`，交互新增 `16 skip paging OK: 130 commits over 3 pages`、
+  `14c panel flips above the chip OK`、`14d panel portal OK`，`14b` 短窗口断言 116px → 120px。
+- 已验证：headless Chrome fixture 实测「就地 fixed 被祖先裁剪/拽出视口，portal 后全可见」（数据见 findings.md）。
+- 下一步：重启桌面端（`127.0.0.1:50467`）后确认提交列表能滚过 300、筛选下拉能用滚轮滚到底。
+- 未做：`package.json` 仍是 0.5.1，未升版本、未动市场索引、未推送（发版另行授权）。

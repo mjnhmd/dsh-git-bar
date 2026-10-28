@@ -151,3 +151,20 @@ GET /dsh-git-bar/authors?sessionId=<id>[&dir=<abs>]
 4. `node test/interaction.test.mjs` 覆盖三条分支：已注册目录只 `create`+`open` 一次、未注册目录现场注册后打开
    （requests 依次为 `create:/repo`、`open:ws-1`、`create:/repo-hotfix`、`open:ws-3`）、目录已删时报错且弹层不关；
 5. README 中英同步这句话；`npm run check` + `npm test` 全绿。
+
+## 第五轮：提交历史超过 300 笔就加载不动 + 筛选面板滚不动（当前任务）
+
+用户（m00005）：「这里最多只能显示 300 个提交么？怎么无法继续加载了？，还有这个删选分支的弹窗，无法往下滚动 只能看到这几个分支」
+
+### 目标与验收
+1. 提交历史能翻过 300 笔：`/log` 增加 `skip`（跳过多少笔），Client 改成「累积 + 续页」，
+   不再靠把 `limit` 一路加到 360/420——Host 会钳到 `MAX_LOG_LIMIT=300`，于是每页都返回同样 300 笔、
+   `hasMore` 恒真，列表永远停在第 300 笔。
+   验收：`node test/host.test.mjs` 造 400+ 笔提交的仓库，`limit=60` 连续 `skip=0/60/…/360` 拼接拿到 400+ 笔、
+   无重复、最后一页 `hasMore:false`；`skip=abc`、`skip=-1` 退回 0 而不是 500。
+2. 筛选下拉（分支 / 提交人）在长列表下能滚动：面板经 `createPortal` 挂到 `document.body`，
+   祖先的 `transform` / `overflow:hidden` 不再影响它；下方放不下时向上翻，列表高度按剩余空间收紧（120–240px）。
+   验收：`node test/interaction.test.mjs` 断言 portal 被使用、窗口矮时面板翻到按钮上方、
+   列表有显式高度且 `overflowY:auto`；缺 `react-dom` 时就地渲染且不报错。
+3. 顶部计数（`N 笔提交`）与页脚跟累积结果一致；到达 `HISTORY_MAX_COMMITS` 时明确提示还有更多。
+4. `npm run check` + `npm test` 全绿，中英 README 的 `/log` 契约同步 `skip`。

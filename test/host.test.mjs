@@ -652,6 +652,49 @@ assert.equal(r.status, 200)
 assert.equal(r.json.commits.length, 3)
 console.log('42 limit clamping OK')
 
+// 42b. 翻页靠偏移量：历史比「一页最多多少笔」长的时候照样能翻过去。
+//      只放大 limit 会撞上 MAX_LOG_LIMIT，每页拿回同一批提交——提交列表就卡在 300 笔不动了。
+const paging = makeRepo(join(base, 'paging'), { commit: false })
+const paged = []
+for (let index = 0; index < 400; index += 1) {
+  const ident = 'Page One <page@example.com> 1700000000 +0000'
+  const message = `p${String(index).padStart(3, '0')}`
+  paged.push('commit refs/heads/main', `mark :${index + 1}`, `author ${ident}`, `committer ${ident}`, `data ${Buffer.byteLength(message)}`, message)
+  if (index > 0) paged.push(`from :${index}`)
+  paged.push('')
+}
+execFileSync('git', ['-C', paging, 'fast-import', '--quiet'], {
+  input: `${paged.join('\n')}\n`,
+  stdio: ['pipe', 'pipe', 'pipe'],
+})
+const walked = []
+let walking = true
+for (let skip = 0; walking; skip += 60) {
+  assert.ok(skip <= 420, 'paging terminates')
+  r = await call(`/dsh-git-bar/log?dir=${dirParam(paging)}&limit=60&skip=${skip}`)
+  assert.equal(r.status, 200)
+  walked.push(...r.json.commits.map((commit) => commit.subject))
+  walking = r.json.hasMore
+}
+assert.equal(walked.length, 400, `every commit is reachable by offset, got ${walked.length}`)
+assert.equal(new Set(walked).size, 400, 'pages do not overlap')
+assert.equal(walked[0], 'p399', 'first page starts at the newest commit')
+assert.equal(walked.at(-1), 'p000', 'last page ends at the root commit')
+r = await call(`/dsh-git-bar/log?dir=${dirParam(paging)}&limit=5&skip=abc`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits[0].subject, 'p399', 'a bad skip means the first page')
+r = await call(`/dsh-git-bar/log?dir=${dirParam(paging)}&limit=5&skip=-5`)
+assert.equal(r.status, 200)
+assert.equal(r.json.commits[0].subject, 'p399', 'a negative skip means the first page')
+r = await call(`/dsh-git-bar/log?dir=${dirParam(paging)}&limit=5&skip=998`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.commits, [], 'a skip past the end is an empty page')
+assert.equal(r.json.hasMore, false)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(paging)}&limit=5&skip=100000`)
+assert.equal(r.status, 200)
+assert.deepEqual(r.json.commits, [], 'an absurd skip is clamped, not refused')
+console.log('42b log skip paging OK', walked.length, 'commits over', Math.ceil(400 / 60), 'pages')
+
 // 43. log outside a repository degrades to an empty page
 r = await call(`/dsh-git-bar/log?dir=${dirParam(plain)}`)
 assert.equal(r.status, 200)

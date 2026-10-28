@@ -21,6 +21,31 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
+    /**
+     * 浮层要挂到 `document.body` 下才安全：留在原位置时，只要祖先带 `transform` /
+     * `filter` / `contain`，`position:fixed` 就会被拽成相对那个祖先定位，再叠上
+     * `overflow:hidden` 就是「面板看得见、滚轮推不动」。拿不到 `react-dom`
+     * （测试里的迷你运行时、非浏览器环境）时就地渲染，不能因此把整块视图搞崩。
+     */
+    const ReactDOM = (() => {
+      try {
+        return require('react-dom')
+      } catch {
+        return null
+      }
+    })()
+
+    /** 有 react-dom 就把浮层 portal 到 body，否则原样返回。 */
+    function portalToBody(node) {
+      if (ReactDOM === null || typeof ReactDOM.createPortal !== 'function') return node
+      if (typeof document === 'undefined' || document.body === null) return node
+      try {
+        return ReactDOM.createPortal(node, document.body)
+      } catch {
+        return node
+      }
+    }
+
     /** Dictionary namespace owned by this plugin. */
     const NS = 'git-bar'
     /** Host route that answers the git facts for one Session. */
@@ -50,12 +75,16 @@ window.__ModuleLoader__.load({
     const AUTHORS_ROUTE = '/dsh-git-bar/authors'
     /** Conversation-view tab id owned by this plugin. */
     const HISTORY_VIEW_ID = 'git-bar-history'
-    /** Commits asked for by one page, and added by every "load more". */
+    /** Commits asked for by one page; every "load more" asks for the next one. */
     const HISTORY_PAGE = 60
+    /** Hard stop for "load more": past this the list is long enough to be useless. */
+    const HISTORY_MAX_COMMITS = 3000
     /** Distance from the list bottom, in px, that triggers the next page. */
     const HISTORY_SCROLL_SLACK = 120
     /** Tallest the filter dropdown's option list may get before it scrolls. */
     const MENU_LIST_MAX = 240
+    /** Shortest the filter dropdown's option list may get; below this it flips above the chip. */
+    const MENU_LIST_MIN = 120
     /** Width of one graph lane. */
     const LANE_W = 12
     /** Height of one history row; the graph cell is drawn to the same grid. */
@@ -138,6 +167,7 @@ window.__ModuleLoader__.load({
       'history.notRepository': '这个目录不在 Git 仓库里',
       'history.nomatch': '没有匹配的提交',
       'history.more': '加载更多提交',
+      'history.capped': '已到 {count} 笔上限，缩小筛选范围才能看更早的提交',
       'history.pick': '选一笔提交查看详情',
       'history.files': '变更文件',
       'history.noFiles': '这笔提交没有文件变更',
@@ -218,6 +248,7 @@ window.__ModuleLoader__.load({
       'history.notRepository': 'This directory is not inside a Git repository',
       'history.nomatch': 'No commit matches',
       'history.more': 'Load more commits',
+      'history.capped': 'Stopped at {count} commits — narrow the filter to reach older ones',
       'history.pick': 'Pick a commit to see its detail',
       'history.files': 'Changed files',
       'history.noFiles': 'This commit changes no file',
@@ -2252,7 +2283,7 @@ window.__ModuleLoader__.load({
       const readCwd = typeof props.readCwd === 'function' ? props.readCwd : () => undefined
       const dir = readCwd() ?? ''
 
-      const [page, setPage] = React.useState({ limit: HISTORY_PAGE, nonce: 0, branch: '', author: '' })
+      const [page, setPage] = React.useState({ skip: 0, nonce: 0, branch: '', author: '' })
       const [log, setLog] = React.useState({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
       const [filter, setFilter] = React.useState('')
       const [picked, setPicked] = React.useState('')
@@ -2280,7 +2311,13 @@ window.__ModuleLoader__.load({
       }
 
       const listRef = React.useRef(null)
-      const loadMore = () => setPage((current) => ({ ...current, limit: current.limit + HISTORY_PAGE }))
+      // 续页靠偏移量（skip），不是把 limit 越加越大：Host 对 limit 有一条硬上限，
+      // 一路加只会每次都拿回同一页，列表就永远停在上限那个数字上。
+      const loadMore = () => {
+        const loaded = log.commits.length
+        if (log.phase !== 'ready' || !log.hasMore || loaded === 0 || loaded >= HISTORY_MAX_COMMITS) return
+        setPage((current) => ({ ...current, skip: loaded }))
+      }
 
       // 滚到底部附近就续一页，不用手动点「加载更多」。
       const onListScroll = (event) => {
@@ -2305,33 +2342,48 @@ window.__ModuleLoader__.load({
       // 同一筛选条件下的「再要一页」和「换筛选」要区别对待：续页不能把已有提交清空，
       // 否则列表瞬间变矮，浏览器的 scrollTop 被夹回顶部，看起来就是「一加载更多就跳回最上面」。
       const pageKey = `${sessionId}\u0000${dir}\u0000${page.nonce}\u0000${page.branch}\u0000${page.author}`
-      const grownRef = React.useRef({ key: '', limit: 0 })
+      const grownRef = React.useRef({ key: '', skip: 0 })
 
       React.useEffect(() => {
         let live = true
-        const grown = grownRef.current.key === pageKey && page.limit > grownRef.current.limit
-        grownRef.current = { key: pageKey, limit: page.limit }
+        const grown = grownRef.current.key === pageKey && page.skip > 0
+        grownRef.current = { key: pageKey, skip: page.skip }
         if (grown) setLog((current) => (current.commits.length === 0 ? current : { ...current, phase: 'more' }))
         else setLog({ phase: 'loading', commits: [], hasMore: false, reason: '', error: '' })
-        getJson(LOG_ROUTE, { limit: page.limit, branch: page.branch, author: page.author })
+        getJson(LOG_ROUTE, { limit: HISTORY_PAGE, skip: page.skip, branch: page.branch, author: page.author })
           .then((body) => {
             if (!live) return
-            setLog({
-              phase: 'ready',
-              commits: Array.isArray(body.commits) ? body.commits : [],
-              hasMore: body.hasMore === true,
-              reason: typeof body.reason === 'string' ? body.reason : '',
-              error: '',
+            const incoming = Array.isArray(body.commits) ? body.commits : []
+            const reason = typeof body.reason === 'string' ? body.reason : ''
+            setLog((current) => {
+              if (!grown) return { phase: 'ready', commits: incoming, hasMore: body.hasMore === true, reason, error: '' }
+              // 续到的这页接在已有提交后面；两页之间若有新提交落地会错位，按 hash 去重兜住。
+              const seen = new Set(current.commits.map((commit) => commit.hash))
+              const added = incoming.filter((commit) => !seen.has(commit.hash))
+              const commits = current.commits.concat(added)
+              return {
+                phase: 'ready',
+                commits,
+                // 这页没带来任何新提交（历史被改写、偏移量到底）就不要再喊着要下一页。
+                hasMore: body.hasMore === true && added.length > 0 && commits.length < HISTORY_MAX_COMMITS,
+                reason,
+                error: '',
+              }
             })
           })
           .catch((error) => {
             if (!live) return
-            setLog({ phase: 'failed', commits: [], hasMore: false, reason: '', error: error instanceof Error ? error.message : String(error) })
+            const message = error instanceof Error ? error.message : String(error)
+            setLog((current) =>
+              grown && current.commits.length > 0
+                ? { ...current, phase: 'ready', hasMore: false, error: message }
+                : { phase: 'failed', commits: [], hasMore: false, reason: '', error: message },
+            )
           })
         return () => {
           live = false
         }
-      }, [sessionId, dir, page.limit, page.nonce, page.branch, page.author])
+      }, [sessionId, dir, page.skip, page.nonce, page.branch, page.author])
 
       // 一页装不满可视区（大窗口）时自动再要一页，否则没有滚动条也就没有滚动事件。
       React.useEffect(() => {
@@ -2503,7 +2555,7 @@ window.__ModuleLoader__.load({
             type: 'button',
             style: styles.paneAction,
             title: t('history.refresh'),
-            onClick: () => setPage({ limit: HISTORY_PAGE, nonce: page.nonce + 1 }),
+            onClick: () => setPage({ skip: 0, nonce: page.nonce + 1 }),
           },
           t('history.refresh'),
         ),
@@ -2511,7 +2563,7 @@ window.__ModuleLoader__.load({
 
       const applyFilter = (kind, value) =>
         setPage((current) => ({
-          limit: HISTORY_PAGE,
+          skip: 0,
           nonce: current.nonce + 1,
           branch: kind === 'branch' ? String(value) : current.branch,
           author: kind === 'author' ? String(value) : current.author,
@@ -2523,13 +2575,13 @@ window.__ModuleLoader__.load({
         setMenuAnchor(null)
       }
 
-      // 打开时量一次按钮边界，面板才能稳稳贴在它下面而不被裁剪。
+      // 打开时量一次按钮边界：面板贴它下面，下方放不下就翻到它上面。
       const openMenu = (kind, event) => {
         setMenu(kind)
         setMenuQuery('')
         const node = event?.currentTarget
         const rect = node && typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null
-        setMenuAnchor(rect ? { left: rect.left, bottom: rect.bottom } : null)
+        setMenuAnchor(rect ? { left: rect.left, top: rect.top, bottom: rect.bottom } : null)
       }
 
       // 面板是浮动层：点别处就收起，否则它会一直盖在提交列表上。
@@ -2554,17 +2606,30 @@ window.__ModuleLoader__.load({
           needle === ''
             ? items
             : items.filter((item) => item.label.toLowerCase().includes(needle))
-        // 有按钮边界就用 fixed 贴近它，并按窗口剩余高度收紧列表；量不到就退回绝对定位。
+        // 有按钮边界就按窗口剩余空间摆：下方塞不下整块面板就翻到按钮上方，
+        // 两边都挤时取空间大的那边；量不到边界就退回绝对定位。
         const anchor = menu === kind ? menuAnchor : null
+        const viewportH = typeof window !== 'undefined' && typeof window.innerHeight === 'number' ? window.innerHeight : 0
+        const viewportW = typeof window !== 'undefined' && typeof window.innerWidth === 'number' ? window.innerWidth : 0
+        const below = anchor === null ? MENU_LIST_MAX + 40 : viewportH - anchor.bottom - 24
+        const above = anchor === null ? 0 : anchor.top - 24
+        const flip = anchor !== null && below < MENU_LIST_MIN + 40 && above > below
+        const room = flip ? above : below
+        const listStyle = { ...historyStyles.menuList, height: `${Math.max(MENU_LIST_MIN, Math.min(MENU_LIST_MAX, room - 40))}px` }
         const panelStyle =
           anchor === null
             ? historyStyles.menu
-            : { ...historyStyles.menu, position: 'fixed', left: `${anchor.left}px`, top: `${anchor.bottom + 4}px` }
-        const room =
-          anchor !== null && typeof window !== 'undefined' && typeof window.innerHeight === 'number'
-            ? window.innerHeight - anchor.bottom - 24
-            : MENU_LIST_MAX + 40
-        const listStyle = { ...historyStyles.menuList, height: `${Math.max(96, Math.min(MENU_LIST_MAX, room - 40))}px` }
+            : {
+                ...historyStyles.menu,
+                position: 'fixed',
+                maxHeight: 'none',
+                // portal 出去以后不再受祖先裁剪，但也要自己压住宿主界面。
+                zIndex: '1200',
+                left: `${viewportW > 0 ? Math.max(8, Math.min(anchor.left, Math.max(8, viewportW - 328))) : anchor.left}px`,
+                ...(flip
+                  ? { top: 'auto', bottom: `${Math.max(8, viewportH - anchor.top + 4)}px` }
+                  : { top: `${anchor.bottom + 4}px` }),
+              }
         return h(
           'div',
           { style: historyStyles.chipWrap },
@@ -2586,53 +2651,55 @@ window.__ModuleLoader__.load({
           ),
           menu !== kind
             ? null
-            : h(
-                'div',
-                { style: panelStyle, role: 'listbox', 'data-history-menu': kind },
+            : portalToBody(
                 h(
                   'div',
-                  { style: historyStyles.menuSearch },
-                  h('input', {
-                    type: 'search',
-                    value: menuQuery,
-                    placeholder: kind === 'branch' ? t('history.searchBranch') : t('history.searchAuthor'),
-                    'aria-label': label,
-                    style: historyStyles.menuSearchInput,
-                    'data-history-menu-search': kind,
-                    autoFocus: true,
-                    onChange: (event) => setMenuQuery(event.target.value),
-                    onKeyDown: (event) => {
-                      if (event.key === 'Escape') closeMenu()
-                    },
-                  }),
-                ),
-                h(
-                  'div',
-                  { style: listStyle, 'data-history-menu-list': kind },
-                  shown.length === 0
-                    ? h('div', { style: historyStyles.menuHint }, t('history.noOption'))
-                    : shown.map((item) =>
-                        h(
-                          'button',
-                          {
-                            key: `${kind}:${item.value}`,
-                            type: 'button',
-                            role: 'option',
-                            'aria-selected': page[kind] === item.value ? 'true' : 'false',
-                            'data-history-option': item.value,
-                            style:
-                              page[kind] === item.value
-                                ? { ...historyStyles.menuItem, ...historyStyles.menuItemActive }
-                                : historyStyles.menuItem,
-                            title: item.label,
-                            onClick: () => {
-                              applyFilter(kind, item.value)
-                              closeMenu()
+                  { style: panelStyle, role: 'listbox', 'data-history-menu': kind },
+                  h(
+                    'div',
+                    { style: historyStyles.menuSearch },
+                    h('input', {
+                      type: 'search',
+                      value: menuQuery,
+                      placeholder: kind === 'branch' ? t('history.searchBranch') : t('history.searchAuthor'),
+                      'aria-label': label,
+                      style: historyStyles.menuSearchInput,
+                      'data-history-menu-search': kind,
+                      autoFocus: true,
+                      onChange: (event) => setMenuQuery(event.target.value),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Escape') closeMenu()
+                      },
+                    }),
+                  ),
+                  h(
+                    'div',
+                    { style: listStyle, 'data-history-menu-list': kind },
+                    shown.length === 0
+                      ? h('div', { style: historyStyles.menuHint }, t('history.noOption'))
+                      : shown.map((item) =>
+                          h(
+                            'button',
+                            {
+                              key: `${kind}:${item.value}`,
+                              type: 'button',
+                              role: 'option',
+                              'aria-selected': page[kind] === item.value ? 'true' : 'false',
+                              'data-history-option': item.value,
+                              style:
+                                page[kind] === item.value
+                                  ? { ...historyStyles.menuItem, ...historyStyles.menuItemActive }
+                                  : historyStyles.menuItem,
+                              title: item.label,
+                              onClick: () => {
+                                applyFilter(kind, item.value)
+                                closeMenu()
+                              },
                             },
-                          },
-                          item.label,
+                            item.label,
+                          ),
                         ),
-                      ),
+                  ),
                 ),
               ),
         )
@@ -2657,7 +2724,7 @@ window.__ModuleLoader__.load({
                 style: historyStyles.chip,
                 title: t('history.reset'),
                 'data-history-reset': '',
-                onClick: () => setPage({ limit: HISTORY_PAGE, nonce: page.nonce + 1, branch: '', author: '' }),
+                onClick: () => setPage({ skip: 0, nonce: page.nonce + 1, branch: '', author: '' }),
               },
               t('history.reset'),
             )
@@ -2727,7 +2794,13 @@ window.__ModuleLoader__.load({
                       ? h('div', { style: historyStyles.hint, 'data-history-more': 'loading' }, t('history.loading'))
                       : log.hasMore
                         ? h('div', { style: historyStyles.hint, 'data-history-more': '' }, t('history.more'))
-                        : null,
+                        : log.commits.length >= HISTORY_MAX_COMMITS
+                          ? h(
+                              'div',
+                              { style: historyStyles.hint, 'data-history-more': 'capped' },
+                              t('history.capped').replace('{count}', String(log.commits.length)),
+                            )
+                          : null,
                   )
 
       const files =
@@ -3028,6 +3101,8 @@ window.__ModuleLoader__.load({
          不必把整棵组件树渲染一遍。 */
       layoutGraph,
       graphLaneCount,
+      /* 测试钩子：浮层该不该离场，取决于有没有 react-dom，单独导出来直接断言两条分支。 */
+      portalToBody,
     }
   },
 })

@@ -8,7 +8,7 @@
  *   GET  /dsh-git-bar/worktrees?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/changes?sessionId=<id>[&dir=<absolute path>]
  *   GET  /dsh-git-bar/diff?sessionId=<id>[&dir=<absolute path>]&path=<relative>[&staged=0|1]
- *   GET  /dsh-git-bar/log?sessionId=<id>[&dir=<absolute path>][&limit=<1..300>][&branch=<ref>][&author=<text>]
+ *   GET  /dsh-git-bar/log?sessionId=<id>[&dir=<absolute path>][&limit=<1..300>][&skip=<0..>][&branch=<ref>][&author=<text>]
  *   GET  /dsh-git-bar/commit?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>
  *   GET  /dsh-git-bar/commit-diff?sessionId=<id>[&dir=<absolute path>]&hash=<4..40 hex>&path=<relative>
  *   GET  /dsh-git-bar/authors?sessionId=<id>[&dir=<absolute path>]
@@ -134,6 +134,9 @@ const DEFAULT_LOG_LIMIT = 60
 
 /** Largest `/log` page a caller may ask for. */
 const MAX_LOG_LIMIT = 300
+
+/** Largest `/log` offset a caller may ask for; beyond this the list is not a list. */
+const MAX_LOG_SKIP = 100000
 
 /** Largest number of files described for one commit; the count still reports them all. */
 const MAX_COMMIT_FILES = 500
@@ -877,6 +880,25 @@ function parseLimit(url) {
 }
 
 /**
+ * Read how many commits a `/log` request wants skipped.
+ *
+ * Paging is by offset, not by growing `limit`: `limit` has a hard ceiling, so a
+ * client that only raises it stops seeing new commits once it hits that
+ * ceiling. An absent, empty, non-numeric or negative `skip` means the first
+ * page, so a stale client keeps working.
+ *
+ * @param url - parsed request URL.
+ * @returns the number of commits to skip.
+ */
+function parseSkip(url) {
+  const raw = url.searchParams.get('skip')
+  if (raw === null || raw.trim() === '') return 0
+  const value = Number(raw)
+  if (!Number.isFinite(value)) return 0
+  return Math.min(MAX_LOG_SKIP, Math.max(0, Math.trunc(value)))
+}
+
+/**
  * Cut an oversized diff at the shared character cap.
  * @param result - the `runGit` result of a diff command.
  * @returns the (possibly cut) diff text and whether it had to be cut.
@@ -1031,13 +1053,15 @@ function parseLog(text) {
  * @param dir - absolute directory, whether or not it is a repository.
  * @param limit - page size, already clamped.
  * @param filters - `{ branch, author }`, either null when that filter is off.
+ * @param skip - how many commits the caller already has, already clamped.
  * @returns `{ status, body }`; the body carries no `dir` or `filters`.
  */
-async function readLog(dir, limit, filters) {
+async function readLog(dir, limit, filters, skip = 0) {
   const args = ['log']
   if (filters.branch === null) args.push('--all')
   else args.push(filters.branch)
   args.push('--topo-order', '--decorate=full', '-n', String(limit + 1), `--format=${LOG_FORMAT}`)
+  if (skip > 0) args.push(`--skip=${skip}`)
   if (filters.author !== null) args.push(`--author=${filters.author}`)
   const result = await runGit(dir, args, { trim: false })
   if (!result.ok && !result.overflow) {
@@ -1483,7 +1507,7 @@ export function apply(ctx) {
             if (filters.author !== null && !validAuthorFilter(filters.author)) {
               return { status: 400, body: { error: 'invalid-author' } }
             }
-            const page = await readLog(dir, parseLimit(url), filters)
+            const page = await readLog(dir, parseLimit(url), filters, parseSkip(url))
             return { status: page.status, body: { dir, ...page.body, filters } }
           }),
       }),

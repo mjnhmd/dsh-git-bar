@@ -156,11 +156,12 @@ count }], truncated }`, aggregated over `git log --all`, most commits first, tie
 names alphabetical, capped at 500 rows. It exists so the author filter can offer
 people who only appear deeper in the history than the current page.
 
-`GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300][&branch=<ref>][&author=<text>]`
+`GET /dsh-git-bar/log?sessionId=<id>[&limit=1..300][&skip=0..][&branch=<ref>][&author=<text>]`
 — `{ dir, commits, hasMore, truncated, filters: { branch, author } }`, where each commit is `{ hash, short, parents, author, email, when,
 subject, refs: [{ name, kind }] }`. `kind` is `head`, `local`, `remote` or `tag`,
 and `name` is the short ref name (the same form `/branches` reports). 60 commits
-by default, 300 at most.
+by default, 300 at most; `skip` is how many commits the caller already has, which
+is how the panel pages through a history longer than one page.
 
 `GET /dsh-git-bar/commit?sessionId=<id>&hash=<4..40 hex>` — `{ dir, hash, short,
 parents, author, email, when, subject, body, files, truncated }`, each file being

@@ -226,6 +226,34 @@ const authorsReply = {
     { name: 'Bob', email: 'bob@example.com', count: 1 },
   ],
 }
+// 一个比一页更长的历史：翻页用例用，假 Host 按 skip/limit 切片，行为对齐真 Host 的偏移量分页。
+const pagingCommits = Array.from({ length: 130 }, (_, index) => {
+  const hash = `h${String(index).padStart(7, '0')}`
+  return {
+    hash,
+    short: hash,
+    subject: `p${String(index).padStart(3, '0')}`,
+    parents: index === 0 ? [] : [`h${String(index - 1).padStart(7, '0')}`],
+    author: 'Ada',
+    email: 'ada@example.com',
+    when: '2026-10-27T02:00:00Z',
+    refs: [],
+  }
+})
+let logMode = 'default'
+const pagingReplyFor = (url) => {
+  const query = new URLSearchParams(url.slice(url.indexOf('?') + 1))
+  const limit = Number(query.get('limit') ?? '60')
+  const skip = Number(query.get('skip') ?? '0')
+  return {
+    dir: '/repo-link',
+    commits: pagingCommits.slice(skip, skip + limit),
+    hasMore: skip + limit < pagingCommits.length,
+    truncated: false,
+    reason: '',
+    filters: { branch: null, author: null },
+  }
+}
 globalThis.fetch = async (url) => {
   const text = String(url)
   fetches.push(text)
@@ -238,7 +266,7 @@ globalThis.fetch = async (url) => {
   }
   if (text.startsWith('/dsh-git-bar/commit-diff')) return { ok: true, json: async () => commitDiffReply }
   if (text.startsWith('/dsh-git-bar/commit')) return { ok: true, json: async () => commitReply }
-  if (text.startsWith('/dsh-git-bar/log')) return { ok: true, json: async () => logReplyFor(text) }
+  if (text.startsWith('/dsh-git-bar/log')) return { ok: true, json: async () => (logMode === 'paging' ? pagingReplyFor(text) : logReplyFor(text)) }
   if (text.startsWith('/dsh-git-bar/info')) return { ok: true, json: async () => infoReply }
   return { ok: false, status: 404, json: async () => ({}) }
 }
@@ -510,7 +538,11 @@ listNode.props.onScroll({ currentTarget: { scrollTop: 400, clientHeight: 300, sc
 await flush()
 historyTree = runtime.rerender(historyElement)
 const pagedLog = fetches.filter((url) => url.includes('/dsh-git-bar/log')).at(-1)
-assert.ok(pagedLog.includes('limit=120'), `scroll near the bottom asks for the next page: ${pagedLog}`)
+assert.ok(pagedLog.includes('limit=60'), `page size stays one page instead of growing: ${pagedLog}`)
+assert.ok(
+  pagedLog.includes('skip=1'),
+  `scroll near the bottom asks for what comes after the loaded commits: ${pagedLog}`,
+)
 const manualMore = findAll(historyTree, (node) => node.type === 'button' && textOf(node).join('') === 'T:history.more')
 assert.equal(manualMore.length, 0, 'no manual load-more button any more')
 console.log('13 infinite scroll OK:', pagedLog.slice(pagedLog.indexOf('?')))
@@ -608,10 +640,41 @@ assert.equal(tall.list.props.style.height, '240px', 'roomy window: list keeps th
 anchoredChip.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 24, bottom: 120 }) } })
 historyTree = runtime.rerender(historyElement)
 const short = openWithRect(300)
-assert.equal(short.list.props.style.height, '116px', 'short window: list shrinks to the space left below the chip')
+assert.equal(short.list.props.style.height, '120px', 'short window: list shrinks to the space left below the chip')
 assert.equal(short.list.props.style.overflowY, 'auto', 'shrunk list still scrolls')
-globalThis.window = undefined
 console.log('14b panel anchoring OK')
+
+// 14c. 下方连最矮的面板都放不下就翻到按钮上方：贴着窗口底边再往下画，整块面板就出屏了。
+globalThis.window = { innerHeight: 500, innerWidth: 1200 }
+const chipNow = () => findAll(historyTree, (node) => node.props['data-history-chip'] === 'branch')[0]
+const lowRect = () => ({ left: 24, top: 400, bottom: 460 })
+chipNow().props.onClick({ currentTarget: { getBoundingClientRect: lowRect } })
+historyTree = runtime.rerender(historyElement) // 收起上一次的面板
+chipNow().props.onClick({ currentTarget: { getBoundingClientRect: lowRect } })
+historyTree = runtime.rerender(historyElement)
+const flippedPanel = findAll(historyTree, (node) => node.props['data-history-menu'] === 'branch')[0]
+const flippedList = findAll(historyTree, (node) => node.props['data-history-menu-list'] === 'branch')[0]
+assert.equal(flippedPanel.props.style.top, 'auto', 'panel flips above the chip when there is no room below')
+assert.equal(flippedPanel.props.style.bottom, '104px', 'flipped panel sits right above the chip')
+assert.equal(flippedList.props.style.height, '240px', 'flipped panel keeps the full cap')
+assert.equal(flippedPanel.props.style.zIndex, '1200', 'panel outranks the host UI it is portaled over')
+chipNow().props.onClick({ currentTarget: { getBoundingClientRect: lowRect } })
+historyTree = runtime.rerender(historyElement)
+console.log('14c panel flips above the chip OK')
+
+// 14d. 浮层该不该离场：有 react-dom 就 portal 到 body（祖先的 transform/overflow 才拽不住它），
+//      没有就地渲染——测试运行时就是后者，28 条断言全靠它才跑得通。
+const plainNode = { type: 'div', props: {}, children: [] }
+assert.equal(plugin.portalToBody(plainNode), plainNode, 'without react-dom the panel renders in place')
+const portaled = globalThis.__captured.factory((id) =>
+  id === 'react-dom' ? { createPortal: (node, target) => ({ type: '__portal__', props: { target }, children: [node] }) } : runtime.React,
+)
+const hoisted = portaled.portalToBody(plainNode)
+assert.equal(hoisted.type, '__portal__', 'with react-dom the panel leaves through a portal')
+assert.equal(hoisted.props.target, globalThis.document.body, 'the portal target is document.body')
+assert.equal(hoisted.children[0], plainNode, 'the panel itself is unchanged inside the portal')
+console.log('14d panel portal OK')
+globalThis.window = undefined
 
 // 15. /authors 拉不到时退回已加载提交里的作者，筛选照常可用
 authorsMode = 'fail'
@@ -628,5 +691,41 @@ assert.deepEqual(
   'a failed author list falls back to the loaded commits',
 )
 console.log('15 author fallback OK:', fallbackOptions.length, 'options')
+
+// 16. 历史比一页更长：滚到底继续加载，列表是累积的，也不会每页都拿回同一批。
+//     只把 limit 越加越大时每页返回的都是同一批提交，列表就永远卡在 Host 的上限上——
+//     这正是「300 个提交之后再也加载不出来」的成因。
+logMode = 'paging'
+historyTree = runtime.mount(historyElement)
+await flush()
+historyTree = runtime.rerender(historyElement)
+const historyRows = () => findAll(historyTree, (node) => typeof node.props['data-history-commit'] === 'string')
+const scrollToBottom = () => {
+  findAll(historyTree, (node) => node.props['data-history-list'] !== undefined)[0].props.onScroll({
+    currentTarget: { scrollTop: 900, clientHeight: 300, scrollHeight: 1200 },
+  })
+}
+const logCalls = () => fetches.filter((url) => url.includes('/dsh-git-bar/log')).length
+assert.equal(historyRows().length, 60, 'the first page holds exactly one page of commits')
+scrollToBottom()
+await flush()
+historyTree = runtime.rerender(historyElement)
+assert.equal(historyRows().length, 120, 'the next page is appended, not swapped in')
+const secondPage = fetches.filter((url) => url.includes('/dsh-git-bar/log')).at(-1)
+assert.ok(secondPage.includes('skip=60'), `the second page asks for the commits after the first: ${secondPage}`)
+scrollToBottom()
+await flush()
+historyTree = runtime.rerender(historyElement)
+const loadedHashes = historyRows().map((row) => row.props['data-history-commit'])
+assert.equal(loadedHashes.length, 130, 'the last page tops the list off')
+assert.equal(new Set(loadedHashes).size, 130, 'no commit is listed twice')
+assert.deepEqual([loadedHashes[0], loadedHashes.at(-1)], ['h0000000', 'h0000129'], 'pages keep the host order')
+const callsBeforeIdle = logCalls()
+scrollToBottom()
+await flush()
+historyTree = runtime.rerender(historyElement)
+assert.equal(logCalls(), callsBeforeIdle, 'a fully loaded history asks for nothing more')
+assert.equal(historyRows().length, 130)
+console.log('16 skip paging OK:', loadedHashes.length, 'commits over 3 pages')
 
 console.log('\nALL INTERACTION TESTS PASSED')

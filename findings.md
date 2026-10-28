@@ -50,3 +50,35 @@
   点到面板与 chip 之外就关闭。
 - 待用户确认：0.5.0 是 11:16 推的，用户 11:19 反馈——若面板里已有搜索框，说明加载的是 0.5.0 之后的代码，
   但当时列表未被 240px 截断，怀疑桌面端仍在跑更早一次加载的模块实例。修复后需重启桌面端再验。
+
+## 「提交到 300 笔就加载不动」根因（0.5.2）
+- Client 续页是把 `page.limit` 每次 +60（60→120→…→360），Host `parseLimit()` 却钳到
+  `MAX_LOG_LIMIT = 300`（`index.js:135`），所以 `limit=360` 与 `limit=300` 完全等价：
+  每次返回同样 300 笔、`hasMore = commits.length > limit` 仍为 true，列表长度永远不涨；
+  顶栏 `history.count` 显示的就是 `log.commits.length`，于是停在「300 笔提交」。
+- 结论：`/log` 没有偏移量，靠放大 `limit` 天生撞天花板。修法是加 `skip` 参数 + 客户端累积续页，
+  而不是把 `MAX_LOG_LIMIT` 调大（调大仍然是每页全量重传）。
+- 注意 `git log --skip=N` 与 `--topo-order`、`--all` 可同时使用；续页之间若有新提交落地会错位，
+  客户端按 hash 去重足以兜住。
+
+## 筛选下拉滚不动（第五轮）
+- 0.5.1 已把面板改成 `position: fixed` 并按窗口剩余高度收紧，但只要面板仍是「就地渲染」，
+  祖先的 `transform` / `filter` / `contain` 都会把 fixed 变成相对那个祖先定位（再叠 `overflow:hidden` 就是裁掉），
+  `getBoundingClientRect()` 量出来的视口坐标在缩放祖先里也不对。
+- 现成参照：同机 `dsh-dream-skin/lib/client.js:3290` 的注释与 `dshmarket` 都明确「带 position:fixed 的浮层
+  一律 `createPortal(…, document.body)` 离场」；`require('react-dom')` 在 Client 沙箱里可用。
+- 因此本轮改为 portal + 上下翻转 + 显式高度；缺 `react-dom` 时就地渲染兜底（测试运行时就是这条路径）。
+
+## 真 DOM 实测：就地 fixed 会被祖先拽走/裁掉（第六轮，headless Chrome）
+用自己的 fixture（`--dump-dom` 取页面内 JS 写出来的测量结果）复现两种失败模式，两种面板都是
+`position:fixed`、搜索框 32px + 列表 240px、按钮 rect 来自 `getBoundingClientRect()`：
+
+| 祖先条件 | 就地渲染（修复前） | portal 到 body（修复后） |
+|---|---|---|
+| `transform` + `overflow:hidden`，host 在 y=0 高 300，按钮底边 215 | 面板 top 219，列表 240px 里**只有 47px 落在裁剪区内，完整可见 0 行** | 面板 top 219，列表 **240px 全部可见**，完整可见 7 行 |
+| 同上但 host 挪到 `top:400px`（按钮底边 615） | 面板 top **1019**（被当成相对祖先定位，掉到 813px 视口外），可见 0px | 面板 top **619**，列表 134px 全可见，完整可见 3 行 |
+
+- 结论：只要祖先带 `transform`/`filter`/`contain`，就地 `position:fixed` 就变成「相对祖先定位」，
+  再叠 `overflow:hidden` 就是「只剩几个分支」甚至整块跑到屏外——用户报的「面板看得见、滚不动/只有几个」对得上。
+- 这也解释了为什么只调高度、加 `overflow-y:auto` 治不好：坐标本身算错/被裁剪，滚动当然推不动。
+- fixture 与脚本只留在系统临时目录（`/tmp/gitbar-dropdown/`），未入库。
