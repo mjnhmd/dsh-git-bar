@@ -82,3 +82,13 @@
   headless Chrome fixture 覆盖「无复位 / min-height:0 / overflow:hidden」三种条件（数据见 findings.md）。
 - 待确认：重启桌面端后下拉能否滚到底；用户反馈「项目分支很多、只拉到 14 个」——需确认是否要列远端分支。
 - 未做：未升版本、未推送。
+
+## 分支筛选补上远端分支（第八轮）
+- 已完成：Host `readRemotes()` + `/branches` 回复新增 `remotes` / `remotesTruncated`（`origin/HEAD` 这类符号引用跳过，上限 500）。
+- 已完成：Client 筛选选项 = 本地分支 + 远端分支（`origin/x` 排在本地之后），搜索框因此能搜到只存在于远端的分支；
+  作者搜索本来就走 `/authors` 全历史，不受当前页限制。
+- 已验证：host 新增 `14b remote branches OK 2 commits on origin/feature`（造 `origin/feature` + `origin/HEAD` 符号引用，
+  断言只列出真分支、`/log?branch=origin/feature` 能用）；交互新增 `17 search covers every option OK`
+  （搜 `FEAT` 命中 `origin/feat-x`、搜 `zoe` 命中只在 `/authors` 里的 Zoe）；`npm run check` + `npm test` 全绿。
+- 待确认：重启桌面端后分支下拉能否看到远端分支、能否滚到底。
+- 未做：未升版本、未推送。

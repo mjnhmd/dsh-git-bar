@@ -160,6 +160,9 @@ const branchReply = {
     { name: 'main', current: false, upstream: null, ahead: 0, behind: 0, subject: 'first', checkedOutIn: '/repo' },
     { name: 'ghost', current: false, upstream: null, ahead: 0, behind: 0, subject: 'free', checkedOutIn: null },
   ],
+  // 只存在于远端的那个分支，正是用户「项目里分支很多、下拉里没拉全」指的东西
+  remotes: [{ name: 'origin/feat-x', remote: 'origin', branch: 'feat-x' }],
+  remotesTruncated: false,
   dirty: { changed: 0, staged: 0, unstaged: 0, untracked: 0 },
 }
 
@@ -487,8 +490,8 @@ assert.ok(fetches.some((url) => url.startsWith('/dsh-git-bar/branches')), 'branc
 const branchOptions = findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string')
 assert.deepEqual(
   branchOptions.map((option) => option.props['data-history-option']),
-  ['', 'codex/perf', 'main', 'ghost'],
-  'all-branches entry plus every local branch',
+  ['', 'codex/perf', 'main', 'ghost', 'origin/feat-x'],
+  'all-branches entry, every local branch, then the remote-tracking ones',
 )
 branchOptions.find((option) => option.props['data-history-option'] === 'main').props.onClick()
 await flush()
@@ -738,5 +741,45 @@ historyTree = runtime.rerender(historyElement)
 assert.equal(logCalls(), callsBeforeIdle, 'a fully loaded history asks for nothing more')
 assert.equal(historyRows().length, 130)
 console.log('16 skip paging OK:', loadedHashes.length, 'commits over 3 pages')
+
+// 17. 搜索框搜的是「下拉里的全部选项」：远端分支能被搜到，提交人也不受当前页限制
+logMode = 'default'
+authorsMode = 'ok'
+historyTree = runtime.mount(historyElement)
+await flush()
+historyTree = runtime.rerender(historyElement)
+const openChip = (kind) => {
+  findAll(historyTree, (node) => node.props['data-history-chip'] === kind)[0].props.onClick()
+  historyTree = runtime.rerender(historyElement)
+}
+const typeInto = (kind, value) => {
+  findAll(historyTree, (node) => node.props['data-history-menu-search'] === kind)[0].props.onChange({
+    target: { value },
+  })
+  historyTree = runtime.rerender(historyElement)
+}
+const optionValues = () =>
+  findAll(historyTree, (node) => typeof node.props['data-history-option'] === 'string').map(
+    (node) => node.props['data-history-option'],
+  )
+const openAndSettle = async (kind) => {
+  openChip(kind)
+  await flush()
+  historyTree = runtime.rerender(historyElement)
+}
+await openAndSettle('branch')
+typeInto('branch', 'FEAT')
+assert.deepEqual(optionValues(), ['origin/feat-x'], 'a remote-tracking branch is searchable, case-insensitively')
+openChip('branch')
+await flush()
+historyTree = runtime.rerender(historyElement)
+await openAndSettle('author')
+typeInto('author', 'zoe')
+assert.deepEqual(
+  optionValues(),
+  ['Zoe'],
+  'the author search covers the whole history, not just the commits on screen',
+)
+console.log('17 search covers every option OK')
 
 console.log('\nALL INTERACTION TESTS PASSED')

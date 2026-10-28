@@ -247,12 +247,33 @@ assert.equal(trackedGhost.ahead, 0)
 assert.equal(trackedGhost.behind, 0)
 console.log('14 upstream counts OK', trackedMain.ahead, trackedMain.behind)
 
+// 14b. 远端分支也列出来给筛选用：「项目里分支很多、下拉里没拉全」指的是只列 refs/heads。
+//      符号引用 origin/HEAD 不是分支，不能占一行。
+GIT(tracked, 'update-ref', 'refs/remotes/origin/feature', GIT(tracked, 'rev-parse', 'main').trim())
+GIT(tracked, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+r = await call(`/dsh-git-bar/branches?dir=${dirParam(tracked)}`)
+assert.equal(r.status, 200)
+assert.deepEqual(
+  r.json.remotes.map((remote) => remote.name),
+  ['origin/feature', 'origin/main'],
+  '远端分支按名字排序，origin/HEAD 这种符号引用被跳过',
+)
+assert.deepEqual(r.json.remotes[1], { name: 'origin/main', remote: 'origin', branch: 'main' })
+assert.equal(r.json.remotesTruncated, false)
+r = await call(`/dsh-git-bar/log?dir=${dirParam(tracked)}&branch=origin/feature&limit=5`)
+assert.equal(r.status, 200)
+assert.ok(r.json.commits.length > 0, 'a remote-tracking branch works as a history filter')
+assert.equal(r.json.reason, undefined)
+console.log('14b remote branches OK', r.json.commits.length, 'commits on origin/feature')
+
 // 15. branches outside a repository
 r = await call(`/dsh-git-bar/branches?dir=${dirParam(plain)}`)
 assert.equal(r.status, 200)
 assert.equal(r.json.repository, null)
 assert.equal(r.json.reason, 'not-a-repository')
 assert.deepEqual(r.json.branches, [])
+assert.deepEqual(r.json.remotes, [])
+assert.equal(r.json.remotesTruncated, false)
 assert.deepEqual(r.json.dirty, { changed: 0, staged: 0, unstaged: 0, untracked: 0 })
 console.log('15 branches not-a-repository OK')
 

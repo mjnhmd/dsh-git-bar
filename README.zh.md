@@ -22,7 +22,7 @@ DeepSeek Harness 的 Git 状态条插件：在会话输入框上方、工作区�
 - **逐文件 diff**：点击改动数，在右侧「工作区改动」面板中选择文件、查看统一 diff，支持未跟踪文件。
 - **多工作树**：显示「链接工作树」或工作树数量；点击列出各工作树的分支与改动数，可复制路径，或在指定工作树目录新建会话——该目录还没注册成工作区时会先注册。不会移动现有会话。
 - **分支占用提示**：已在其他工作树检出的分支会置灰，并提示占用目录。
-- **Git 历史**：主对话区多一个「Git 历史」标签页。左侧是最左侧分叉图谱（一条 lane 一种颜色，合并提交画出折返线）+ 提交列表 + 关键字过滤，再加分支、提交人两个下拉——筛选在 git 里做，管的是整条历史而不是已加载的那一页。点一笔提交看作者、时间、完整提交信息和变更文件，再点文件看它在这笔提交里的统一 diff；滚到底部自动加载更早的提交，没有「加载更多」按钮。两个下拉各自带搜索框、选项区自己滚动，分支成百上千也能用；提交人候选来自 `/authors`，也就是整个仓库的提交，而不只是已加载的那一页。全部只读，不写任何引用。
+- **Git 历史**：主对话区多一个「Git 历史」标签页。左侧是最左侧分叉图谱（一条 lane 一种颜色，合并提交画出折返线）+ 提交列表 + 关键字过滤，再加分支、提交人两个下拉——筛选在 git 里做，管的是整条历史而不是已加载的那一页。点一笔提交看作者、时间、完整提交信息和变更文件，再点文件看它在这笔提交里的统一 diff；滚到底部自动加载更早的提交，没有「加载更多」按钮。两个下拉各自带搜索框、选项区自己滚动，分支成百上千也能用；分支下拉同时列本地分支和远端分支（`origin/<分支>`），只存在于远端的分支也能搜到、也能用来筛选；提交人候选来自 `/authors`，也就是整个仓库的提交，而不只是已加载的那一页。全部只读，不写任何引用。
 - **文字可复制**：拖选状态条文字不会误触弹窗。
 
 状态条每 8 秒刷新，也会在窗口重新获得焦点或切换会话时刷新。读取状态不会修改仓库；只有你明确点击切换或新建分支时才执行相应 Git 写操作。Git 拒绝切换（例如存在冲突的本地修改）时会返回错误，不自动丢弃修改。
@@ -88,7 +88,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-git-bar
 | 请求 | 行为 / 返回值 |
 |---|---|
 | `GET /dsh-git-bar/info?sessionId=<id>[&dir=<absolute path>]` | 返回 `{ dir, repository }`；不是 Git 仓库时 `repository` 为 `null` |
-| `GET /dsh-git-bar/branches?sessionId=<id>` | 返回 `{ branches, dirty }`；分支包含 `name`、`current`、`upstream`、`ahead`、`behind`、`subject`、`checkedOutIn` |
+| `GET /dsh-git-bar/branches?sessionId=<id>` | 返回 `{ branches, remotes, remotesTruncated, dirty }`；`branches` 是切换器用的本地分支（`name`、`current`、`upstream`、`ahead`、`behind`、`subject`、`checkedOutIn`），`remotes` 是历史筛选用的远端分支（`<remote>/<branch>`，上限 500 条，超出时 `remotesTruncated` 为 true） |
 | `GET /dsh-git-bar/worktrees?sessionId=<id>` | 返回 `{ root, worktrees }`，包含路径、分支、SHA、主 / 当前工作树标记和改动数 |
 | `POST /dsh-git-bar/branches/checkout` | 请求 `{ sessionId, branch }`，成功返回 `{ branch, created: false }`；Git 拒绝时返回 409 |
 | `POST /dsh-git-bar/branches/create` | 请求 `{ sessionId, name, from? }`，通过 `git check-ref-format --branch` 校验名称，成功返回 `{ branch, created: true }` |

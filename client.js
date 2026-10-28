@@ -2424,11 +2424,11 @@ window.__ModuleLoader__.load({
         getJson(BRANCHES_ROUTE, {})
           .then((body) => {
             if (!live) return
-            setBranches(
-              (Array.isArray(body.branches) ? body.branches : [])
-                .map((branch) => String(branch?.name ?? ''))
-                .filter((name) => name !== ''),
-            )
+            // 本地分支在前、远端分支（`origin/x`）在后：用户要找的分支常常只存在于远端，
+            // 只列 `refs/heads` 会把一个活跃仓库的大半分支持续藏起来。
+            const names = (rows) =>
+              (Array.isArray(rows) ? rows : []).map((row) => String(row?.name ?? '')).filter((name) => name !== '')
+            setBranches([...names(body.branches), ...names(body.remotes)])
           })
           .catch(() => {
             if (live) setBranches([])

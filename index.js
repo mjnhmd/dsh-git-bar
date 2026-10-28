@@ -144,6 +144,12 @@ const MAX_COMMIT_FILES = 500
 /** Largest number of author candidates described; a longer list is cut and flagged. */
 const MAX_AUTHORS = 500
 
+/** 提交历史的分支筛选最多列多少个远端分支（本地分支不设限，通常只有几十个）。 */
+const MAX_REMOTES = 500
+
+/** `%(symref)` 非空的 `refs/remotes` 条目是符号引用（如 `origin/HEAD`），不是真分支。 */
+const REMOTE_FORMAT = '%(refname:short)%00%(symref)'
+
 /** The only shape a revision may have: 4..40 hex digits, never an option or a path. */
 const HASH_PATTERN = /^[0-9a-f]{4,40}$/i
 
@@ -638,6 +644,38 @@ async function readBranches(dir) {
     if (Number.isFinite(parsedBehind)) branch.behind = parsedBehind
   })
   return branches
+}
+
+/**
+ * List remote-tracking branches for the history filter.
+ *
+ * The history filter may name any revision `git log` accepts, and the branch a
+ * user wants to look at is often one that only exists on the remote — a plain
+ * `for-each-ref refs/heads` list silently hides most of a busy repository.
+ * Symbolic entries (`origin/HEAD`) are skipped: they are not branches, and
+ * offering them would make two rows mean one thing.
+ *
+ * @param dir - absolute directory.
+ * @returns up to `MAX_REMOTES` names as `<remote>/<branch>` and whether any were cut.
+ */
+async function readRemotes(dir) {
+  const listed = await runGit(dir, ['for-each-ref', `--format=${REMOTE_FORMAT}`, 'refs/remotes'])
+  if (!listed.ok) return { remotes: [], truncated: false }
+  const remotes = []
+  for (const line of listed.out.split('\n')) {
+    if (line === '') continue
+    const [name, symref] = line.split('\0')
+    if (name === undefined || name === '') continue
+    if (symref !== undefined && symref !== '') continue
+    const separator = name.indexOf('/')
+    remotes.push({
+      name,
+      remote: separator === -1 ? '' : name.slice(0, separator),
+      branch: separator === -1 ? name : name.slice(separator + 1),
+    })
+  }
+  remotes.sort((left, right) => left.name.localeCompare(right.name))
+  return { remotes: remotes.slice(0, MAX_REMOTES), truncated: remotes.length > MAX_REMOTES }
 }
 
 /**
@@ -1382,7 +1420,11 @@ export function apply(ctx) {
         path: ROUTE_BRANCHES,
         handler: (req, res) =>
           serveGet(ctx, req, res, 'branches-failed', async (dir) => {
-            const [repository, branches] = await Promise.all([repositoryFor(dir), readBranches(dir)])
+            const [repository, branches, remote] = await Promise.all([
+              repositoryFor(dir),
+              readBranches(dir),
+              readRemotes(dir),
+            ])
             return {
               status: 200,
               body: {
@@ -1390,6 +1432,9 @@ export function apply(ctx) {
                 repository,
                 ...(repository === null ? { reason: 'not-a-repository' } : {}),
                 branches: repository === null ? [] : branches,
+                // 远端分支只给提交历史的筛选用：它不是一个能 checkout 的本地分支。
+                remotes: repository === null ? [] : remote.remotes,
+                remotesTruncated: repository === null ? false : remote.truncated,
                 dirty: repository === null ? NO_DIRTY : repository.dirty,
               },
             }

@@ -116,3 +116,15 @@ headless Chrome fixture 复现（14 行真实分支名、`max-height:248px; padd
   行再加 `flexShrink: 0`（局部兜底）。`historyStyles.menuList` 与 `styles.menuList` 同源同改。
 - 上一轮用 20 行 × 30px 的 fixture 得出的「flex column 照样溢出、不会压扁」只在没有宿主 button 复位时成立，
   所以那一版 `display:block` 改动曾被我误判成非必要并回滚——现在的证据（真机 17.14px + 两种复位各自复现）才支持它。
+
+## 分支筛选只列本地分支（第八轮）
+- 用户：「这个项目里边有非常多的分支 应该是没拉全」+「搜索也要支持搜索全部分支 不只是本地分支 包括提交人也是」。
+  真机数据是 `count: 14`（「全部分支」+ 13 个本地分支），而 `readBranches()` 只读 `refs/heads`，
+  远端分支一个都没进来 —— 活跃仓库的分支大半只存在于远端，所以是「没拉全」。
+- 搜索本身没问题：`filterChip()` 对下拉里的**全部选项**做 `label.toLowerCase().includes(needle)`，
+  没有条数上限；作者侧本来就走 `/authors`（`git log --all` 全历史）。缺的只是分支数据。
+- 修法：Host 新增 `readRemotes(dir)`（`for-each-ref --format='%(refname:short)%00%(symref)' refs/remotes`，
+  `%(symref)` 非空的是 `origin/HEAD` 这类符号引用、跳过；排序后 `MAX_REMOTES = 500` 截断并回报 `remotesTruncated`），
+  `/branches` 回复新增 `remotes` / `remotesTruncated`；Client 把 `body.remotes` 接在本地分支之后塞进筛选选项。
+- `remotes` 只用于提交历史筛选：`/log?branch=origin/feat-x` 走的是 `git log <revision>`（`args.push(filters.branch)`），
+  `validBranchFilter()` 的 `BRANCH_PATTERN = /^[A-Za-z0-9._/-]+$/` 接受这种名字；切换/新建分支仍只看 `branches`，语义不变。

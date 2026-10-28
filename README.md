@@ -47,8 +47,10 @@ the commit list and a keyword filter, plus two dropdowns that narrow the list by
 branch and by author — both run in git, so they apply to the whole history rather
 than to the page already loaded. Each dropdown has its own search box and its
 options scroll on their own, so a repository with hundreds of branches is still
-usable; the author list comes from `/authors`, i.e. from every commit in the
-repository, not just the page already loaded. Picking a commit reads its author, time, full
+usable. The branch dropdown lists every local branch and every remote-tracking
+one (`origin/<branch>`), so a branch that only exists on the remote can still be
+searched for and filtered by; the author list comes from `/authors`, i.e. from
+every commit in the repository, not just the page already loaded. Picking a commit reads its author, time, full
 message and changed files; picking a file reads its unified diff inside that
 commit. Scrolling to the bottom loads older commits by itself; there is no
 "load more" button. The tab only reads: no ref, index or worktree is written.
@@ -131,9 +133,12 @@ them with screenshots containing real workspace, session or private project data
   `/commits/`). A local-path remote yields `null` and the id stays plain text.
 
 `GET /dsh-git-bar/branches?sessionId=<id>` — `{ branches: [{ name, current,
-upstream, ahead, behind, subject, checkedOutIn }], dirty }`, where
-`checkedOutIn` is the worktree path holding that branch (a branch can only be
-checked out in one worktree at a time).
+upstream, ahead, behind, subject, checkedOutIn }], remotes: [{ name, remote,
+branch }], remotesTruncated, dirty }`, where `checkedOutIn` is the worktree path
+holding that branch (a branch can only be checked out in one worktree at a time).
+`remotes` is the list behind the history branch filter — `<remote>/<branch>`
+names that `/log?branch=` accepts as a revision — capped at 500 entries with
+`remotesTruncated` set when more exist; `branches` is what the switcher offers.
 
 `GET /dsh-git-bar/worktrees?sessionId=<id>` — `{ root, worktrees: [{ path, name,
 branch, detached, sha, bare, locked, prunable, main, current, dirty }] }`, each
