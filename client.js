@@ -421,8 +421,11 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-primary, #111827)',
       },
       menuList: {
-        display: 'flex',
-        flexDirection: 'column',
+        // 这一层既是高度受限、又是 overflow-y:auto 的那一层，所以它必须是块级容器：
+        // 宿主页面的 button 复位带了 min-height:0 / overflow:hidden，行一旦成了 flex item
+        // 就会被压到 17px 全塞进来——scrollHeight 恒等于 clientHeight，滚动条和滚轮都不出现，
+        // 看着就是「分支只显示到一半、滚不动」（真机上实测 14 行 × 17.14px = 240px）。
+        display: 'block',
         overflowY: 'auto',
         maxHeight: '248px',
         padding: '4px',
@@ -432,6 +435,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '6px',
         width: '100%',
+        flexShrink: 0,
         padding: '6px 8px',
         border: 'none',
         background: 'none',
@@ -1869,8 +1873,8 @@ window.__ModuleLoader__.load({
         maxHeight: '240px',
         overflowY: 'auto',
         overscrollBehavior: 'contain',
-        display: 'flex',
-        flexDirection: 'column',
+        // 同 historyStyles.menuList：块级容器才溢出成滚动，flex column 只会把行压扁。
+        display: 'block',
         padding: '4px',
       },
       menuHint: {
@@ -1880,6 +1884,7 @@ window.__ModuleLoader__.load({
       },
       menuItem: {
         padding: '4px 8px',
+        flexShrink: 0,
         font: 'inherit',
         fontSize: '12px',
         textAlign: 'left',

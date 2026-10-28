@@ -72,3 +72,13 @@
 - 已验证：headless Chrome fixture 实测「就地 fixed 被祖先裁剪/拽出视口，portal 后全可见」（数据见 findings.md）。
 - 下一步：重启桌面端（`127.0.0.1:50467`）后确认提交列表能滚过 300、筛选下拉能用滚轮滚到底。
 - 未做：`package.json` 仍是 0.5.1，未升版本、未动市场索引、未推送（发版另行授权）。
+
+## 筛选下拉「滚不动」真因修复（第七轮）
+- 已定位：不是裁切（portal 已生效、面板完整在视口内），而是 `menuList` 作为 flex column 时，
+  宿主对 `button` 的复位（`min-height:0` / `overflow:hidden`）让行失去最小高度保护、被压到 17.14px 铺满，
+  `scrollHeight` 恒等于 `clientHeight` → 没有滚动条、滚轮无效。
+- 已修改：`historyStyles.menuList`、`styles.menuList` 改 `display: block`；两处 `menuItem` 加 `flexShrink: 0`。
+- 已验证：`npm run check` + `npm test` 全绿；交互测试 `5`、`14` 新增「列表是块级容器 + 行不压缩」断言；
+  headless Chrome fixture 覆盖「无复位 / min-height:0 / overflow:hidden」三种条件（数据见 findings.md）。
+- 待确认：重启桌面端后下拉能否滚到底；用户反馈「项目分支很多、只拉到 14 个」——需确认是否要列远端分支。
+- 未做：未升版本、未推送。

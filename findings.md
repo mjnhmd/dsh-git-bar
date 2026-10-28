@@ -82,3 +82,37 @@
   再叠 `overflow:hidden` 就是「只剩几个分支」甚至整块跑到屏外——用户报的「面板看得见、滚不动/只有几个」对得上。
 - 这也解释了为什么只调高度、加 `overflow-y:auto` 治不好：坐标本身算错/被裁剪，滚动当然推不动。
 - fixture 与脚本只留在系统临时目录（`/tmp/gitbar-dropdown/`），未入库。
+
+## 真正的「滚不动」根因：行被压扁，列表永不溢出（第七轮，用户真机数据）
+portal 修好之后用户仍报「筛分支面板不能滚动」，真机 Console 量到的数字把方向从「裁切」翻到「布局」：
+
+```
+inBody: true, panelPos: 'fixed', panelTop: 145, panelH: 283, viewportH: 820,
+listH: 248, listClientH: 248, listScrollH: 248, overflowY: 'auto', scrollTopAfterSet150: 0
+count: 14, rowH: 19, clientH: 248, scrollH: 248
+```
+
+- 面板已经 portal 到 `document.body`、完整落在视口内（top 145 + 283 < 820），**不是裁切问题**。
+- `scrollHeight === clientHeight === 248` 说明列表内容没有溢出，所以既没有滚动条、`scrollTop` 也夹在 0。
+- 但 `rowH` 只有 19px：正常行应是 `6px` 上下 padding + `18px` 行高 = 30px。14 × 17.14 = 240
+  （240 + 8 padding = 248）——**行被 flex 收缩压到刚好铺满**，于是永远不溢出。
+
+headless Chrome fixture 复现（14 行真实分支名、`max-height:248px; padding:4px`、行是 30px 按钮）：
+
+| 行上的额外规则 | rowH | clientH | scrollH | scrollTop 设 200 后 |
+|---|---|---|---|---|
+| 无（裸结构） | 30 | 248 | 428 | 180 |
+| `min-height: 0` | 17.14 | 248 | 248 | 0 |
+| `overflow: hidden` | 17.14 | 248 | 248 | 0 |
+| `min-height:0` + 列表改 `display:block` | 30 | 248 | 428 | 180 |
+| `min-height:0` + 行加 `flexShrink:0` | 30 | 248 | 428 | 180 |
+| 两者都加 | 30 | 248 | 428 | 180 |
+
+- 机制：`menuList` 是 `display:flex; flex-direction:column` 且高度受限，行是 flex item。
+  裸 DOM 里 `min-height:auto` 会把行托在内容高度、照常溢出成滚动；但宿主页面对 `button` 的复位
+  带了 `min-height:0` / `overflow:hidden`（先验到其中任一即可），行的最小高度保护消失，
+  flex 收缩把 14 行压缩成 240px 铺满，`scrollHeight` 恒等于 `clientHeight` —— 用户看到的就是「只有这几个分支、滚不动」。
+- 修法（两处 `menuList` 一起改）：列表改 `display: block`（块级容器不会压缩子元素，结构上免疫），
+  行再加 `flexShrink: 0`（局部兜底）。`historyStyles.menuList` 与 `styles.menuList` 同源同改。
+- 上一轮用 20 行 × 30px 的 fixture 得出的「flex column 照样溢出、不会压扁」只在没有宿主 button 复位时成立，
+  所以那一版 `display:block` 改动曾被我误判成非必要并回滚——现在的证据（真机 17.14px + 两种复位各自复现）才支持它。

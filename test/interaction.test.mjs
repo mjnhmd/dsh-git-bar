@@ -416,6 +416,11 @@ assert.equal(byName.get('main').props.disabled, true)
 assert.equal(byName.get('main').props['aria-disabled'], undefined)
 assert.notEqual(byName.get('ghost').props.disabled, true)
 assert.notEqual(byName.get('codex/perf').props.disabled, true)
+// 宿主页面的 button 复位自带 min-height:0 / overflow:hidden，行一旦是 flex item 就会被压扁，
+// 列表于是永远不溢出、滚不动（真机上实测：14 行被压到 17.14px，scrollHeight 恒等于 clientHeight）。
+const branchList = findAll(tree, (node) => node.props.role === 'listbox')[0]
+assert.equal(branchList.props.style.display, 'block', 'branch menu list is a block container, not a flex column')
+assert.equal(byName.get('ghost').props.style.flexShrink, 0, 'branch rows keep their own height')
 console.log('5 occupied branches greyed OK')
 
 // --- Git 历史标签页：图谱 → 提交详情 → 单文件 diff ---
@@ -590,6 +595,9 @@ const menuList = findAll(historyTree, (node) => node.props['data-history-menu-li
 assert.ok(menuList !== undefined, 'panel renders a dedicated option list')
 assert.equal(menuList.props.style.overflowY, 'auto', 'option list scrolls on its own')
 assert.equal(menuList.props.style.maxHeight, '240px', 'option list is height-capped')
+assert.equal(menuList.props.style.display, 'block', 'option list is a block container, so its rows overflow into a scrollbar')
+const optionRow = findAll(historyTree, (node) => node.props['data-history-option'] !== undefined)[0]
+assert.equal(optionRow.props.style.flexShrink, 0, 'option rows keep their own height instead of compressing to fit')
 const menuSearch = findAll(historyTree, (node) => node.props['data-history-menu-search'] === 'branch')[0]
 assert.ok(menuSearch !== undefined, 'panel has a search box')
 assert.equal(menuSearch.props.autoFocus, true, 'search box takes focus when the panel opens')
