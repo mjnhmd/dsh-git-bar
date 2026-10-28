@@ -35,6 +35,10 @@ DeepSeek Harness 的 Git 状态条插件：在会话输入框上方、工作区�
 
 ![右侧边栏中的逐文件 diff](docs/preview-changes.png)
 
+### Git 历史
+
+![主对话区的 Git 标签页：分叉图谱、提交详情与逐文件 diff](docs/preview-history.png)
+
 ## 安装
 
 需要 **DSH >= 0.2.1-rc.2**，且宿主进程能访问 `git` 命令。本插件当前通过 GitHub 发布，不依赖 npm 账号。
@@ -73,7 +77,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-git-bar
 
 ## 市场预览图
 
-根目录的 [screenshots.json](screenshots.json) 按顺序声明三张预览图，路径相对于该文件。社区目录的下一次每日构建会采集已推送的清单；本地修改或仅在 README 中加图，不代表卡片立即更新。
+根目录的 [screenshots.json](screenshots.json) 按顺序声明四张预览图，路径相对于该文件。社区目录的下一次每日构建会采集已推送的清单；本地修改或仅在 README 中加图，不代表卡片立即更新。
 
 图片由 `scripts/previews/` 中的虚构场景生成。更新时继续使用假数据，不要上传含内部路径、凭据或真实会话信息的截图。
 

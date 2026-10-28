@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head>
+<body><div class="stage" style="width:1360px">
+  <div class="tabstrip"><span class="tab">对话</span><span class="tab">轨迹</span><span class="tab active">Git</span></div>
+  <div class="history">
+    <div class="hhead">
+      <span class="title">Git</span>
+      <span class="count">6 个提交</span>
+      <div class="filter">过滤提交信息…</div>
+      <span class="refresh">刷新</span>
+    </div>
+    <div class="hbody">
+      <div class="hlist">
+        <div class="hrow">
+          <svg width="24" height="26" viewBox="0 0 24 26" aria-hidden="true"><path d="M6 13L6 26" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><path d="M6 13C6 19.5 18 19.5 18 26" fill="none" stroke="#e879a6" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="13" r="4" fill="#4f8cff"/></svg>
+          <span class="subject">Merge branch 'feat/retry-policy'</span>
+          <span class="refs"><span class="ref head">main</span><span class="ref remote">origin/main</span></span>
+          <span class="author">Ada Chen</span><span class="when">今天 10:32</span>
+        </div>
+        <div class="hrow active">
+          <svg width="24" height="26" viewBox="0 0 24 26" aria-hidden="true"><path d="M6 0L6 26" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><path d="M18 0L18 13" fill="none" stroke="#e879a6" stroke-width="1.6" stroke-linecap="round"/><path d="M18 13L18 26" fill="none" stroke="#e879a6" stroke-width="1.6" stroke-linecap="round"/><circle cx="18" cy="13" r="3.4" fill="#e879a6" stroke="#fff" stroke-width="1.2"/></svg>
+          <span class="subject">honor Retry-After on 429</span>
+          <span class="refs"><span class="ref local">feat/retry-policy</span></span>
+          <span class="author">Noah Lin</span><span class="when">今天 10:18</span>
+        </div>
+        <div class="hrow">
+          <svg width="24" height="26" viewBox="0 0 24 26" aria-hidden="true"><path d="M6 0L6 26" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><path d="M18 0L18 13" fill="none" stroke="#e879a6" stroke-width="1.6" stroke-linecap="round"/><path d="M18 13L18 26" fill="none" stroke="#e879a6" stroke-width="1.6" stroke-linecap="round"/><circle cx="18" cy="13" r="3.4" fill="#e879a6" stroke="#fff" stroke-width="1.2"/></svg>
+          <span class="subject">extract exponential backoff helper</span>
+          <span class="author">Noah Lin</span><span class="when">今天 09:54</span>
+        </div>
+        <div class="hrow">
+          <svg width="24" height="26" viewBox="0 0 24 26" aria-hidden="true"><path d="M6 0L6 13" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><path d="M6 13L6 26" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><path d="M18 0C18 6.5 6 6.5 6 26" fill="none" stroke="#e879a6" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="13" r="3.4" fill="#4f8cff" stroke="#fff" stroke-width="1.2"/></svg>
+          <span class="subject">bump fetch client to 3.2.0</span>
+          <span class="refs"><span class="ref tag">v1.2.0</span></span>
+          <span class="author">Sam Wei</span><span class="when">昨天 18:02</span>
+        </div>
+        <div class="hrow">
+          <svg width="12" height="26" viewBox="0 0 12 26" aria-hidden="true"><path d="M6 0L6 13" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><path d="M6 13L6 26" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="13" r="3.4" fill="#4f8cff" stroke="#fff" stroke-width="1.2"/></svg>
+          <span class="subject">document timeout budgets</span>
+          <span class="author">Ada Chen</span><span class="when">昨天 15:41</span>
+        </div>
+        <div class="hrow">
+          <svg width="12" height="26" viewBox="0 0 12 26" aria-hidden="true"><path d="M6 0L6 13" fill="none" stroke="#4f8cff" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="13" r="3.4" fill="#4f8cff" stroke="#fff" stroke-width="1.2"/></svg>
+          <span class="subject">initial import</span>
+          <span class="author">Sam Wei</span><span class="when">10/20 11:07</span>
+        </div>
+      </div>
+      <div class="hdetail">
+        <div class="dhead"><span class="subject">honor Retry-After on 429</span><span class="hash">7c1a9f2</span></div>
+        <div class="dmeta">Noah Lin &lt;noah.lin@acme.test&gt; · 今天 10:18</div>
+        <p class="dbody">429 / 503 都带 Retry-After，指数退避只能当兜底。
+先读响应头，解析不出来再回落到退避序列。
+退避上限压到 8s，避免长尾请求把队列堵住。</p>
+        <div class="dsection">3 个文件变更</div>
+        <div class="dfiles">
+          <div class="dfile active"><span class="status">M</span><span class="path">src/http/retry.ts</span><span class="stat"><span class="add">+18</span> <span class="del">−4</span></span></div>
+          <div class="dfile"><span class="status">A</span><span class="path">src/http/__tests__/retry.test.ts</span><span class="stat"><span class="add">+42</span></span></div>
+          <div class="dfile"><span class="status">M</span><span class="path">src/http/client.ts</span><span class="stat"><span class="add">+3</span> <span class="del">−1</span></span></div>
+        </div>
+        <pre class="ddiff"><span class="meta">diff --git a/src/http/retry.ts b/src/http/retry.ts</span>
+<span class="meta">--- a/src/http/retry.ts</span>
+<span class="meta">+++ b/src/http/retry.ts</span>
+<span class="hunk">@@ -18,8 +18,20 @@ export async function request(input: RequestInfo) {</span>
+   const response = await fetch(input, init)
+   if (response.ok) return response
+<span class="del">-  throw new HttpError(response.status)</span>
+<span class="add">+  if (response.status === 429 || response.status === 503) {</span>
+<span class="add">+    const hinted = Number(response.headers.get('retry-after'))</span>
+<span class="add">+    if (Number.isFinite(hinted) &amp;&amp; hinted &gt; 0) {</span>
+<span class="add">+      await sleep(Math.min(hinted, MAX_DELAY_MS) * 1000)</span>
+<span class="add">+      return request(input)</span>
+<span class="add">+    }</span>
+<span class="add">+  }</span>
+<span class="add">+  throw new HttpError(response.status)</span>
+ }</pre>
+      </div>
+    </div>
+  </div>
+  <p class="caption">主对话区的「Git」标签页（标签在「对话 / 轨迹」旁边）：左边分叉图谱与提交列表，点一笔提交看详情，点变更文件看它在这笔提交里的逐行 diff。（预览图用假数据渲染）</p>
+</div></body></html>

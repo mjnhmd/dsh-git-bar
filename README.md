@@ -48,6 +48,8 @@ commit. The tab only reads: no ref, index or worktree is written.
 - nothing here silently scrolls away: a drag that selects text does not also open
   a popover.
 
+![the Git history tab: commit graph, commit details and per-file diff](docs/preview-history.png)
+
 ![branch popover](docs/preview-branches.png)
 
 ![working tree in the sidebar](docs/preview-changes.png)

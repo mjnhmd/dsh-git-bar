@@ -24,6 +24,7 @@ const shots = [
   ['preview.html', '1472,300', 'preview.png'],
   ['branches.html', '1472,330', 'preview-branches.png'],
   ['changes.html', '772,520', 'preview-changes.png'],
+  ['history.html', '1472,640', 'preview-history.png'],
 ]
 
 if (!existsSync(chrome)) {

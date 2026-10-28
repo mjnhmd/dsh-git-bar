@@ -150,3 +150,59 @@ body {
 .diff .del { color: #dc2626; }
 .diff .meta { color: #9ca3af; }
 .caption { margin: 10px 0 0; font-size: 12px; color: #9ca3af; }
+
+/* 主对话区的 Git 历史标签页：图谱列宽 12px、行高 26px，抄自 client.js 的 LANE_W / GRAPH_ROW_H */
+.tabstrip { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 12.5px; color: #6b7280; }
+.tabstrip .tab { padding: 4px 12px; border-radius: 8px; }
+.tabstrip .tab.active { background: #f3f4f6; color: #1f2328; font-weight: 500; }
+.history { width: 1360px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; font-size: 12.5px; color: #1f2328; }
+.hhead { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #e5e7eb; }
+.hhead .title { font-weight: 600; }
+.hhead .count { font-size: 11px; color: #9ca3af; }
+.hhead .filter {
+  flex: 1 1 auto; padding: 3px 8px; font-size: 12px; color: #b6bcc6;
+  background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px;
+}
+.hhead .refresh { color: #6b7280; }
+.hbody { display: flex; height: 434px; }
+.hlist { flex: 1 1 52%; min-width: 0; overflow: hidden; padding: 4px 0; }
+.hrow { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 4px; height: 26px; }
+.hrow.active { background: #eef2f7; }
+.hrow .subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow .refs { display: flex; gap: 4px; flex: none; }
+.hrow .ref {
+  font-size: 10px; line-height: 15px; padding: 0 5px; border-radius: 999px;
+  border: 1px solid currentColor; max-width: 150px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.ref.head { color: #15803d; }
+.ref.remote { color: #1d4ed8; }
+.ref.tag { color: #b45309; }
+.ref.local { color: #6b7280; }
+.hrow .author, .hrow .when {
+  flex: none; font-size: 11px; color: #9ca3af;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hrow .author { max-width: 110px; }
+.hrow .when { width: 86px; text-align: right; }
+.hdetail { flex: 1 1 48%; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid #e5e7eb; }
+.dhead { padding: 8px 10px 0; display: flex; align-items: baseline; gap: 6px; }
+.dhead .subject { font-weight: 600; flex: 1 1 auto; min-width: 0; }
+.dhead .hash { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #9ca3af; }
+.dmeta { flex: none; padding: 2px 10px 6px; font-size: 11px; color: #9ca3af; }
+.dbody { flex: none; margin: 0; padding: 0 10px 8px; font-size: 12px; line-height: 18px; white-space: pre-wrap; color: #374151; }
+.dsection { flex: none; padding: 4px 10px; font-size: 11px; font-weight: 600; color: #6b7280; border-top: 1px solid #e5e7eb; }
+.dfiles { flex: 0 1 auto; min-height: 0; padding: 0 4px 4px; }
+.dfile { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; }
+.dfile.active { background: #eef2f7; border-radius: 6px; }
+.dfile .status { flex: none; width: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #9ca3af; }
+.dfile .path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.dfile .stat { flex: none; font-size: 11px; color: #9ca3af; }
+.dfile .stat .add { color: #16a34a; }
+.dfile .stat .del { color: #dc2626; }
+.ddiff {
+  flex: 1 1 auto; min-height: 0; margin: 0; padding: 8px 10px;
+  border-top: 1px solid #e5e7eb; background: #fcfcfd; color: #374151;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; line-height: 17px; white-space: pre;
+}
