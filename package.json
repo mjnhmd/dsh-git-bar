@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-bar",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "description": "Shows the Session git context above the composer (repository, branch, changes, ahead/behind, commit link, branch popover, worktree list) and adds a Git history view tab with a commit graph, commit detail (including the branches and tags pointing at the commit, and whether the commit has been pushed to a remote) and per-file diffs.",
   "license": "MIT",
