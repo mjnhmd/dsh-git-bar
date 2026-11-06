@@ -129,3 +129,16 @@
 - 验证：`npm run check` + `npm test` 全绿；`scripts/validate-index.mjs docs/market/index.json` →
   「7 个版本: 0.7.0, 0.6.0, …」「默认版本安装参数 …#8e07e7b…」「索引格式校验通过」。
 - 之后：推 master（已授权）、打 annotated tag `v0.7.0` 指向最后一个 re-pin commit。
+
+## 发版 0.7.1（第十二轮）
+- `chore(release): 0.7.1` = b42953ad4544c23d0baca470b272162d5f93b46e（只改 package.json 版本；补丁版不带新能力，
+  description 与市场条目里的插件描述都不动）。
+- 修的是 PR #1（外部贡献 freedani，rebase 合并为 d5fa409）：首屏锚定状态条改 `width: fit-content` 只占内容宽，
+  行内测量改走 `querySelectorAll('*')` 并跳过 `position: absolute|fixed`，不再吃掉「工作区 / 模式」行 Agent 预设 chip 的点击。
+- re-pin：README.md / README.zh.md 的直装 spec、docs/PUBLISH.zh.md 的「已发布位置」、docs/market/index.json 追加 0.7.1 条目
+  （commit 指向 b42953ad…，publishTimestamp 1793936565），旧版本条目不动。
+- 验证：`npm run check`（隐私检查 31 个文件，无命中）+ `npm test` 全绿（110 条 OK，含 PR #1 新增的
+  `20 anchored row hugs its content`、`21 row measurement reaches nested chips`）；
+  `scripts/validate-index.mjs docs/market/index.json` → 「8 个版本: 0.7.1, 0.7.0, …」
+  「默认版本安装参数 …#b42953ad…」「索引格式校验通过」。
+- 之后：推 master（已授权）、打 annotated tag `v0.7.1` 指向最后一个 re-pin commit。

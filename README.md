@@ -78,7 +78,7 @@ distributed through GitHub; an npm account is not required.
 For the desktop app, use its own Plugin Manager's install/add entry and supply:
 
 ```text
-git+https://github.com/mjnhmd/dsh-git-bar.git#8e07e7b95c6290483cfa94d7581011b474af084e
+git+https://github.com/mjnhmd/dsh-git-bar.git#b42953ad4544c23d0baca470b272162d5f93b46e
 ```
 
 Alternatively, search for **dsh-git-bar** in the community `dshmarket` plugin.
@@ -87,7 +87,7 @@ The desktop app does not necessarily use a CLI profile named `web` or `desktop`.
 For a regular `dsh web` instance (replace `web` if you use another profile):
 
 ```bash
-dsh plugin --profile web add "git+https://github.com/mjnhmd/dsh-git-bar.git#8e07e7b95c6290483cfa94d7581011b474af084e"
+dsh plugin --profile web add "git+https://github.com/mjnhmd/dsh-git-bar.git#b42953ad4544c23d0baca470b272162d5f93b46e"
 ```
 
 For local development:

@@ -23,7 +23,7 @@ DSH **没有**内建的插件索引源，也没有「提交到官方商店」的
 | 用途 | 地址 |
 |---|---|
 | 源码 | https://github.com/mjnhmd/dsh-git-bar |
-| 直装 spec | `git+https://github.com/mjnhmd/dsh-git-bar.git#8e07e7b95c6290483cfa94d7581011b474af084e` |
+| 直装 spec | `git+https://github.com/mjnhmd/dsh-git-bar.git#b42953ad4544c23d0baca470b272162d5f93b46e` |
 | 插件市场索引 | https://mjnhmd.github.io/dsh-git-bar/market/index.json |
 
 「发现」里添加上面那个索引 URL 就能搜到并安装。发新版本时：改 `version` → 提交 → 推 → 用新 commit
