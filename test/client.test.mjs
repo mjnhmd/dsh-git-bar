@@ -285,4 +285,44 @@ assert.deepEqual(
 )
 console.log('19 push-state i18n OK:', pushKeys.length, 'keys in zh + en')
 
+// 20. 锚定状态条只占自身内容宽度。
+// 首屏把状态条浮到“工作区 / 模式”那一行的同一基线上；盒子若铺满卡片宽度，右端这层
+// 透明区域就压在那一行上。而 Agent 预设 chip 是异步出现的，量到的可用宽度来不及缩
+// 回来，chip 的点击就被状态条吃掉。盒宽只留内容，透明命中区就不存在。
+const anchoredStyle = plugin.anchoredRowStyle(
+  { width: '100%', paddingRight: '16px' },
+  { mode: 'anchored', bottom: 24, width: 952, maxWidth: 600 },
+  undefined,
+)
+assert.equal(anchoredStyle.width, 'fit-content', 'anchored row hugs its own content, never the card width')
+assert.equal(anchoredStyle.position, 'absolute', 'anchored row keeps floating on the row baseline')
+assert.equal(anchoredStyle.right, 0, 'anchored row stays flush with the card right edge')
+assert.equal(anchoredStyle.bottom, '24px', 'anchored row uses the measured baseline offset')
+assert.equal(anchoredStyle.maxWidth, '100%')
+assert.equal(anchoredStyle.paddingRight, '16px', 'shared card inset survives')
+
+// 内容比可用宽度宽时仍按量到的宽度收口：只压缩内容，不放开盒子。
+const clampedStyle = plugin.anchoredRowStyle(
+  { width: '100%' },
+  { mode: 'anchored', bottom: 0, width: 952, maxWidth: 420 },
+  { maxWidth: '420px', marginLeft: 'auto' },
+)
+assert.equal(clampedStyle.width, 'fit-content')
+assert.equal(clampedStyle.maxWidth, '420px', 'measured available width still clamps the row')
+console.log('20 anchored row hugs its content OK')
+
+// 21. 一行的已用右边界要递归到 slot 宿主内部。
+// hero 行里每个控件都包在一层 0×0 的 slot 宿主 div 里；只遍历直接子元素会把
+// Agent 预设 chip 整个漏掉，可用宽度算得偏大，状态条就会压到 chip 上。
+const zeroHost = { position: 'static', getBoundingClientRect: () => ({ width: 0, right: 0 }) }
+const folderChip = { position: 'static', getBoundingClientRect: () => ({ width: 80, right: 590 }) }
+const presetChip = { position: 'static', getBoundingClientRect: () => ({ width: 106, right: 700 }) }
+const popover = { position: 'absolute', getBoundingClientRect: () => ({ width: 400, right: 1600 }) }
+globalThis.window.getComputedStyle = (node) => ({ position: node.position, display: 'block' })
+const rects = plugin.rowRects({ querySelectorAll: () => [zeroHost, folderChip, zeroHost, presetChip, popover] })
+assert.equal(rects.length, 4, 'absolute/fixed layers stay out of the row measurement')
+assert.equal(plugin.usedRight(rects), 700, 'a chip nested in a 0×0 slot host still counts')
+assert.equal(plugin.usedRight([zeroHost]), 0, 'no rendered box measures as zero')
+console.log('21 row measurement reaches nested chips OK')
+
 console.log('\nALL CLIENT TESTS PASSED')

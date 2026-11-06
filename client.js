@@ -665,6 +665,58 @@ window.__ModuleLoader__.load({
     }
 
     /** Wrap a row's children into the ambient container. */
+    /**
+     * 「工作区 / 模式」那一行里已经渲染出来的盒子。
+     * @param row - 该行的元素。
+     * @returns 行内每个元素的 rect；`position: absolute|fixed` 的浮层跳过。
+     */
+    function rowRects(row) {
+      const rects = []
+      // 子元素要递归到底：控件常常包在 slot 宿主 div 里，那层宿主是 0×0，
+      // 只看直接子元素会把 chip 整个漏掉（状态条因此算大了可用宽度）。
+      for (const node of row.querySelectorAll('*')) {
+        const position = window.getComputedStyle(node).position
+        if (position === 'absolute' || position === 'fixed') continue
+        rects.push(node.getBoundingClientRect())
+      }
+      return rects
+    }
+
+    /**
+     * 一行里最靠右的已用边界。
+     * @param rects - 行内元素的 rect。
+     * @returns 右边界（px）；一个有效盒子都没有时返回 0。
+     */
+    function usedRight(rects) {
+      let right = 0
+      for (const rect of rects) if (rect.width > 1) right = Math.max(right, rect.right)
+      return right
+    }
+
+    /**
+     * 锚定模式的状态条样式：盒子与自身内容同宽，只占右端那一段。
+     * @param base - 共享的状态条样式。
+     * @param place - 锚定测量结果（`bottom` 用这里量到的基线差）。
+     * @param clamped - 可用宽度限制；内容比它宽时才给。
+     * @returns 绝对定位的内联样式。
+     */
+    function anchoredRowStyle(base, place, clamped) {
+      return {
+        ...base,
+        // 盒子不能拉满卡片宽度：右端这层透明盒子会压在“工作区 / 模式”那一行上，
+        // 而那一行里的控件（Agent 预设 chip）是异步出现的，量到的可用宽度不一定
+        // 来得及缩回来，于是 chip 的点击被这层吃掉了。宽度只留内容，就不再有
+        // 透明命中区，可用宽度只影响内容自身的压缩。
+        width: 'fit-content',
+        position: 'absolute',
+        right: 0,
+        bottom: `${place.bottom}px`,
+        margin: 0,
+        maxWidth: '100%',
+        ...(clamped ?? {}),
+      }
+    }
+
     function Row(children, style, nodeRef, barStyle) {
       return h(
         'div',
@@ -1152,13 +1204,7 @@ window.__ModuleLoader__.load({
           const selectorRect = selector === null ? undefined : selector.getBoundingClientRect()
           // 同一行左侧被“工作区 / 模式”占掉多少：状态条只能用到剩下的宽度，
           // 否则窄窗口下会压到智能体名字上。
-          let leftUsed = 0
-          if (selectorRect !== undefined) {
-            for (const child of selector.children) {
-              const rect = child.getBoundingClientRect()
-              if (rect.width > 1) leftUsed = Math.max(leftUsed, rect.right)
-            }
-          }
+          const leftUsed = selectorRect === undefined ? 0 : usedRight(rowRects(selector))
           const available =
             cardRect === undefined || leftUsed === 0
               ? width
@@ -1186,9 +1232,18 @@ window.__ModuleLoader__.load({
         measure()
         const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : undefined
         if (observer !== undefined) observer.observe(stack)
+        //「工作区 / 模式」那一行的控件是异步出现的（Agent 预设 chip 要等 roster），
+        // 而整行的盒子尺寸不变，ResizeObserver 不会触发；控件还常常挂在 slot 宿主
+        // div 里，所以遍历要带上 subtree，否则 chip 出现也不会重测。
+        const used = stack.querySelector('[class*="WorkspaceRow"]')
+        const watching = typeof MutationObserver === 'function' && used !== null
+          ? new MutationObserver(measure)
+          : undefined
+        if (watching !== undefined) watching.observe(used, { childList: true, subtree: true })
         window.addEventListener('resize', measure)
         return () => {
           if (observer !== undefined) observer.disconnect()
+          if (watching !== undefined) watching.disconnect()
           window.removeEventListener('resize', measure)
         }
       }, [sessionId, view.phase, place.mode])
@@ -1397,15 +1452,7 @@ window.__ModuleLoader__.load({
           : undefined
       const rowStyle = { ...(anchored ? styles.barWrapAnchored : styles.barWrap), ...sized }
       const barStyle = anchored
-        ? {
-            ...styles.bar,
-            position: 'absolute',
-            right: 0,
-            bottom: `${place.bottom}px`,
-            margin: 0,
-            maxWidth: '100%',
-            ...(clamped ?? {}),
-          }
+        ? anchoredRowStyle(styles.bar, place, clamped)
         : { ...styles.bar, ...(clamped ?? {}) }
 
       if (view.phase !== 'ready' && view.phase !== 'failed') return null
@@ -3289,6 +3336,11 @@ window.__ModuleLoader__.load({
       graphLaneCount,
       /* 测试钩子：浮层该不该离场，取决于有没有 react-dom，单独导出来直接断言两条分支。 */
       portalToBody,
+      /* 测试钩子：锚定状态条的盒宽策略是纯函数，单独导出来直接断言“不吃点击”的约定。 */
+      anchoredRowStyle,
+      /* 测试钩子：一行已用的右边界是纯函数，单独导出来断言“0×0 宿主不能把 chip 漏掉”。 */
+      usedRight,
+      rowRects,
     }
   },
 })
